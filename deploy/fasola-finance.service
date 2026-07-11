@@ -1,0 +1,21 @@
+# /etc/systemd/system/fasola-finance.service
+[Unit]
+Description=Fasola Finance dashboard
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+User=fasola
+Group=fasola
+WorkingDirectory=/home/aliceevr/projects/fasola/fasola-finance
+EnvironmentFile=/home/aliceevr/projects/fasola/fasola-finance/.env
+Environment=NODE_ENV=production
+Environment=PORT=3100
+ExecStart=/usr/bin/node dist/server/server.js
+Restart=on-failure
+RestartSec=3
+MemoryMax=384M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "allowJs": true,
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "server/src/**/*.ts",
+    "web/src/**/*.ts",
+    "web/src/**/*.tsx",
+    "web/vite.config.ts",
+    "tests/**/*.ts",
+    "*.config.ts",
+    "eslint.config.js"
+  ]
+}
