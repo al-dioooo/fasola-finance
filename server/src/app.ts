@@ -17,6 +17,7 @@ import type { Db } from "./db/client.js";
 import { buildAuthGuard } from "./modules/auth/auth.guard.js";
 import { registerAuthRoutes } from "./modules/auth/auth.routes.js";
 import { registerBotOpsRoutes } from "./modules/bot-ops/bot-ops.routes.js";
+import { registerBusinessProfileRoutes } from "./modules/business-profile/business-profile.routes.js";
 import { registerExpenseRoutes } from "./modules/expenses/expense.routes.js";
 import { buildLoggerOptions } from "./modules/logs/logger.js";
 import { registerOrderRoutes } from "./modules/orders/order.routes.js";
@@ -50,9 +51,18 @@ export async function createApp(
         scriptSrc: ["'self'"],
         // Recharts and the QR data-URL image need these two relaxations.
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:"]
+        imgSrc: ["'self'", "data:"],
+        // Helmet defaults this directive on, which makes the browser
+        // force-upgrade every subresource on the page to https — fatal on a
+        // plain-HTTP origin (dev, or this process itself; nginx terminates
+        // TLS in production, so upgrading here is never correct).
+        upgradeInsecureRequests: null
       }
-    }
+    },
+    // Same reasoning: an app-level HSTS header on a plain-HTTP origin (e.g.
+    // localhost/127.0.0.1 in dev) makes browsers force-upgrade every future
+    // request to https and then fail outright, since nothing here serves TLS.
+    hsts: false
   });
   await app.register(rateLimit, {
     max: 100,
@@ -86,6 +96,7 @@ export async function createApp(
     await registerOrderRoutes(authenticated, { db: dependencies.db, config });
     await registerReportRoutes(authenticated, { db: dependencies.db, config });
     await registerProductRoutes(authenticated, { db: dependencies.db, config });
+    await registerBusinessProfileRoutes(authenticated, { db: dependencies.db, config });
     await registerExpenseRoutes(authenticated, { db: dependencies.db, config });
     await registerBotOpsRoutes(authenticated, {
       db: dependencies.db,

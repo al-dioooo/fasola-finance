@@ -36,27 +36,5 @@ export const expenseCategoryLabels: Record<ExpenseCategory, string> = {
   lainnya: "Lainnya"
 };
 
-export const orderStatusBadgeClasses: Record<OrderStatus, string> = {
-  "Need Info": "bg-amber-100 text-amber-800",
-  "Pending Admin Confirmation": "bg-amber-100 text-amber-800",
-  Confirmed: "bg-sky-100 text-sky-800",
-  Processing: "bg-indigo-100 text-indigo-800",
-  Ready: "bg-teal-100 text-teal-800",
-  Completed: "bg-emerald-100 text-emerald-800",
-  Cancelled: "bg-stone-200 text-stone-600",
-  "Need Admin Help": "bg-rose-100 text-rose-800"
-};
-
-export const paymentStatusBadgeClasses: Record<PaymentStatus, string> = {
-  "Pending Manual Confirmation": "bg-amber-100 text-amber-800",
-  Unpaid: "bg-rose-100 text-rose-800",
-  Paid: "bg-emerald-100 text-emerald-800",
-  Cancelled: "bg-stone-200 text-stone-600"
-};
-
-export const stockStatusBadgeClasses: Record<StockStatus, string> = {
-  Available: "bg-emerald-100 text-emerald-800",
-  Limited: "bg-amber-100 text-amber-800",
-  "Sold Out": "bg-rose-100 text-rose-800",
-  Hidden: "bg-stone-200 text-stone-600"
-};
+// Status badge colors live with the Badge components in
+// components/ui/Badge.tsx — this module only owns the wording.

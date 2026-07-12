@@ -15,6 +15,8 @@ export interface ProductRecord {
   isAvailable: boolean;
   variants: string[];
   notes: string | null;
+  // Customer-facing copy the bot quotes when answering "what's in this dish".
+  description: string | null;
   updatedAt: string;
 }
 
@@ -26,6 +28,7 @@ export interface CreateProductInput {
   aliases?: string[] | undefined;
   variants?: string[] | undefined;
   notes?: string | null | undefined;
+  description?: string | null | undefined;
 }
 
 export interface UpdateProductInput {
@@ -36,6 +39,7 @@ export interface UpdateProductInput {
   aliases?: string[] | undefined;
   variants?: string[] | undefined;
   notes?: string | null | undefined;
+  description?: string | null | undefined;
 }
 
 export type CreateProductResult =
@@ -56,6 +60,7 @@ interface ProductRow {
   is_available: number;
   variants_json: string;
   notes: string | null;
+  description: string | null;
   updated_at: string;
 }
 
@@ -69,6 +74,7 @@ const SELECT_COLUMNS = `
   is_available,
   variants_json,
   notes,
+  description,
   updated_at
 `;
 
@@ -83,8 +89,9 @@ const INSERT_SQL = `
     is_available,
     variants_json,
     notes,
+    description,
     updated_at
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `;
 
 const UPDATE_SQL = `
@@ -97,7 +104,8 @@ const UPDATE_SQL = `
     is_available = $7,
     variants_json = $8,
     notes = $9,
-    updated_at = $10
+    description = $10,
+    updated_at = $11
   WHERE product_id = $1
 `;
 
@@ -213,6 +221,7 @@ function normalizeCreateInput(productId: string, input: CreateProductInput): Pro
     isAvailable: isAvailableStockStatus(stockStatus),
     variants: normalizeStringList(input.variants ?? []),
     notes: normalizeNullableString(input.notes ?? null),
+    description: normalizeNullableString(input.description ?? null),
     updatedAt: isoUtcNow()
   };
 }
@@ -231,6 +240,10 @@ function normalizeUpdateInput(current: ProductRecord, input: UpdateProductInput)
     isAvailable: isAvailableStockStatus(stockStatus),
     variants: input.variants ? normalizeStringList(input.variants) : current.variants,
     notes: input.notes !== undefined ? normalizeNullableString(input.notes) : current.notes,
+    description:
+      input.description !== undefined
+        ? normalizeNullableString(input.description)
+        : current.description,
     updatedAt: isoUtcNow()
   };
 }
@@ -246,6 +259,7 @@ function toProductParams(product: ProductRecord): unknown[] {
     product.isAvailable ? 1 : 0,
     JSON.stringify(product.variants),
     product.notes,
+    product.description,
     product.updatedAt
   ];
 }
@@ -262,6 +276,7 @@ function mapProductRow(row: ProductRow): ProductRecord {
     isAvailable: Boolean(row.is_available),
     variants: parseStringList(row.variants_json),
     notes: row.notes,
+    description: row.description,
     updatedAt: row.updated_at
   };
 }

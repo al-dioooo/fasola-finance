@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 
 import { api, ApiError } from "./api/client";
 import { Layout } from "./components/Layout";
-import { Spinner } from "./components/ui";
 import { BotOpsPage } from "./pages/BotOpsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
@@ -12,6 +11,7 @@ import { MenuPage } from "./pages/MenuPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 function useAuth() {
   return useQuery({
@@ -27,7 +27,13 @@ export function App() {
   const auth = useAuth();
 
   if (auth.isPending) {
-    return <Spinner label="Memuat..." />;
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-cream-100">
+        <p className="animate-pulse font-display text-xl font-semibold text-pandan-800">
+          Dapoer Mami Fasola
+        </p>
+      </div>
+    );
   }
 
   const authenticated =
@@ -52,6 +58,7 @@ export function App() {
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/bot" element={<BotOpsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -13,12 +13,26 @@ import {
 
 import { api, buildQuery } from "../api/client";
 import type {
+  ProfitBucket,
   ProfitResponse,
   ReportGranularity,
   RevenueResponse,
   TopProductsResponse
 } from "../api/types";
-import { Card, EmptyNote, ErrorNote, Spinner } from "../components/ui";
+import {
+  Badge,
+  Card,
+  CardTitle,
+  CHART_COLORS,
+  EmptyState,
+  ErrorNote,
+  FilterChips,
+  PageHeader,
+  SkeletonCard,
+  Tabs,
+  type TabItem
+} from "../components/ui";
+import { Rise } from "../components/motion/primitives";
 import { formatDateJakarta, formatIDR, todayJakarta } from "../lib/format";
 import { expenseCategoryLabels } from "../lib/labels";
 
@@ -30,21 +44,21 @@ interface DateRange {
   to: string;
 }
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "omzet", label: "Omzet" },
-  { key: "laba", label: "Laba" },
-  { key: "produk", label: "Produk Terlaris" }
+const TABS: readonly TabItem<TabKey>[] = [
+  { id: "omzet", label: "Omzet" },
+  { id: "laba", label: "Laba" },
+  { id: "produk", label: "Produk Terlaris" }
 ];
 
-const OMZET_GRANULARITIES: { value: ReportGranularity; label: string }[] = [
-  { value: "daily", label: "Harian" },
-  { value: "weekly", label: "Mingguan" },
-  { value: "monthly", label: "Bulanan" }
+const OMZET_GRANULARITIES: readonly TabItem<ReportGranularity>[] = [
+  { id: "daily", label: "Harian" },
+  { id: "weekly", label: "Mingguan" },
+  { id: "monthly", label: "Bulanan" }
 ];
 
-const LABA_GRANULARITIES: { value: ProfitGranularity; label: string }[] = [
-  { value: "weekly", label: "Mingguan" },
-  { value: "monthly", label: "Bulanan" }
+const LABA_GRANULARITIES: readonly TabItem<ProfitGranularity>[] = [
+  { id: "weekly", label: "Mingguan" },
+  { id: "monthly", label: "Bulanan" }
 ];
 
 const MONTHS_ID = [
@@ -61,6 +75,20 @@ const MONTHS_ID = [
   "Nov",
   "Des"
 ];
+
+// Shared Recharts styling: warm ink ticks on a cream grid, cream tooltip card.
+const AXIS_TICK = { fontSize: 11, fill: CHART_COLORS.ink };
+
+const TOOLTIP_STYLE: CSSProperties = {
+  backgroundColor: "#fdfcf7",
+  border: "1px solid #e7dcc0",
+  borderRadius: 12,
+  boxShadow: "0 4px 16px -4px rgb(41 32 25 / 0.14)",
+  fontSize: 12,
+  color: CHART_COLORS.ink
+};
+
+const TOOLTIP_CURSOR = { fill: "#f2ebd9", opacity: 0.5 };
 
 // Shift a YYYY-MM-DD business date by whole days. Built from string parts and
 // UTC component math only — never local-timezone Date parsing.
@@ -110,32 +138,29 @@ function formatAxisIDR(value: number): string {
   return String(value);
 }
 
-function ToggleGroup<T extends string>({
-  options,
-  value,
-  onChange
-}: {
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
-}) {
+// Tiny color-dot captions in place of the Recharts <Legend>.
+function ChartDots({ items }: { items: { color: string; label: string }[] }) {
   return (
-    <div className="inline-flex rounded-md border border-stone-200 bg-white p-0.5">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onChange(option.value)}
-          className={`rounded px-3 py-1 text-xs ${
-            option.value === value
-              ? "bg-emerald-700 font-medium text-white"
-              : "text-stone-600 hover:bg-stone-100"
-          }`}
-        >
-          {option.label}
-        </button>
+    <div className="flex items-center gap-3">
+      {items.map((item) => (
+        <span key={item.label} className="inline-flex items-center gap-1.5 text-xs text-ink-500">
+          <span
+            aria-hidden
+            className="size-2 rounded-full"
+            style={{ backgroundColor: item.color }}
+          />
+          {item.label}
+        </span>
       ))}
     </div>
+  );
+}
+
+function EmptyRangeCard() {
+  return (
+    <Card>
+      <EmptyState emoji="📊" message="Belum ada data pada rentang ini." />
+    </Card>
   );
 }
 
@@ -159,40 +184,122 @@ function OmzetTab({ range }: { range: DateRange }) {
 
   return (
     <div className="space-y-3">
-      <ToggleGroup options={OMZET_GRANULARITIES} value={granularity} onChange={setGranularity} />
+      <FilterChips items={OMZET_GRANULARITIES} activeId={granularity} onChange={setGranularity} />
 
-      {revenue.isPending ? <Spinner label="Memuat data omzet..." /> : null}
+      {revenue.isPending ? <SkeletonCard lines={6} /> : null}
       {revenue.isError ? <ErrorNote message="Gagal memuat data omzet." /> : null}
 
       {revenue.data ? (
         buckets.length === 0 ? (
-          <EmptyNote message="Tidak ada data omzet pada periode ini." />
+          <EmptyRangeCard />
         ) : (
-          <>
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle>Grafik Omzet</CardTitle>
+              <ChartDots items={[{ color: CHART_COLORS.pandan, label: "Omzet" }]} />
+            </div>
+
             {unpricedTotal > 0 ? (
-              <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p className="mt-3 rounded-xl border border-kunyit-200 bg-kunyit-50 px-3.5 py-2.5 text-xs text-kunyit-800">
                 {unpricedTotal} pesanan tanpa harga tidak termasuk dalam omzet.
               </p>
             ) : null}
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+
+            <div className="mt-3">
+              <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke={CHART_COLORS.grid}
+                  />
+                  <XAxis
+                    dataKey="label"
+                    tick={AXIS_TICK}
+                    tickLine={false}
+                    axisLine={{ stroke: CHART_COLORS.grid }}
+                  />
                   <YAxis
-                    tick={{ fontSize: 12 }}
+                    tick={AXIS_TICK}
                     width={56}
+                    tickLine={false}
+                    axisLine={false}
                     tickFormatter={(value) => formatAxisIDR(Number(value))}
                   />
-                  <Tooltip formatter={(value) => formatIDR(Number(value))} />
-                  <Bar dataKey="revenue" name="Omzet" fill="#047857" radius={[3, 3, 0, 0]} />
+                  <Tooltip
+                    formatter={(value) => formatIDR(Number(value))}
+                    contentStyle={TOOLTIP_STYLE}
+                    cursor={TOOLTIP_CURSOR}
+                  />
+                  <Bar
+                    dataKey="revenue"
+                    name="Omzet"
+                    fill={CHART_COLORS.pandan}
+                    radius={[6, 6, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </>
+          </Card>
         )
       ) : null}
     </div>
+  );
+}
+
+function ProfitTable({ rows }: { rows: (ProfitBucket & { label: string })[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-cream-300 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-400">
+            <th className="py-2 pr-2 font-semibold">Periode</th>
+            <th className="py-2 pr-2 text-right font-semibold">Omzet</th>
+            <th className="py-2 pr-2 text-right font-semibold">Pengeluaran</th>
+            <th className="py-2 text-right font-semibold">Laba</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.bucket} className="border-b border-cream-200 last:border-0">
+              <td className="py-2.5 pr-2 text-ink-700">{row.label}</td>
+              <td className="py-2.5 pr-2 text-right tabular-nums text-ink-700">
+                {formatIDR(row.revenue)}
+              </td>
+              <td className="py-2.5 pr-2 text-right tabular-nums text-ink-700">
+                {formatIDR(row.expenses)}
+              </td>
+              <td
+                className={`py-2.5 text-right font-semibold tabular-nums ${
+                  row.profit < 0 ? "text-sambal-600" : "text-ink-900"
+                }`}
+              >
+                {formatIDR(row.profit)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ExpenseCategoryList({ rows }: { rows: ProfitResponse["expensesByCategory"] }) {
+  if (rows.length === 0) {
+    return <p className="mt-2 text-sm text-ink-500">Tidak ada pengeluaran pada periode ini.</p>;
+  }
+
+  return (
+    <ul className="mt-1 divide-y divide-cream-200">
+      {rows.map((row) => (
+        <li key={row.category} className="flex items-center justify-between gap-2 py-2.5 text-sm">
+          <span className="text-ink-700">{expenseCategoryLabels[row.category]}</span>
+          <Badge className="bg-kunyit-100 text-kunyit-800 tabular-nums">
+            {formatIDR(row.total)}
+          </Badge>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -215,80 +322,79 @@ function LabaTab({ range }: { range: DateRange }) {
 
   return (
     <div className="space-y-3">
-      <ToggleGroup options={LABA_GRANULARITIES} value={granularity} onChange={setGranularity} />
+      <FilterChips items={LABA_GRANULARITIES} activeId={granularity} onChange={setGranularity} />
 
-      {profit.isPending ? <Spinner label="Memuat data laba..." /> : null}
+      {profit.isPending ? <SkeletonCard lines={6} /> : null}
       {profit.isError ? <ErrorNote message="Gagal memuat data laba." /> : null}
 
       {profit.data ? (
         buckets.length === 0 ? (
-          <EmptyNote message="Tidak ada data laba pada periode ini." />
+          <EmptyRangeCard />
         ) : (
           <>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                  <YAxis
-                    tick={{ fontSize: 12 }}
-                    width={56}
-                    tickFormatter={(value) => formatAxisIDR(Number(value))}
-                  />
-                  <Tooltip formatter={(value) => formatIDR(Number(value))} />
-                  <Legend />
-                  <Bar dataKey="revenue" name="Omzet" fill="#047857" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="expenses" name="Pengeluaran" fill="#e11d48" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <Card>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle>Omzet vs Pengeluaran</CardTitle>
+                <ChartDots
+                  items={[
+                    { color: CHART_COLORS.pandan, label: "Omzet" },
+                    { color: CHART_COLORS.kunyit, label: "Pengeluaran" }
+                  ]}
+                />
+              </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-stone-200 text-left text-xs text-stone-500">
-                    <th className="py-2 pr-2 font-medium">Periode</th>
-                    <th className="py-2 pr-2 text-right font-medium">Omzet</th>
-                    <th className="py-2 pr-2 text-right font-medium">Pengeluaran</th>
-                    <th className="py-2 text-right font-medium">Laba</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {chartData.map((row) => (
-                    <tr key={row.bucket} className="border-b border-stone-100">
-                      <td className="py-2 pr-2">{row.label}</td>
-                      <td className="py-2 pr-2 text-right">{formatIDR(row.revenue)}</td>
-                      <td className="py-2 pr-2 text-right">{formatIDR(row.expenses)}</td>
-                      <td
-                        className={`py-2 text-right font-medium ${
-                          row.profit < 0 ? "text-rose-600" : "text-stone-900"
-                        }`}
-                      >
-                        {formatIDR(row.profit)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+              <div className="mt-3">
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={chartData}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      vertical={false}
+                      stroke={CHART_COLORS.grid}
+                    />
+                    <XAxis
+                      dataKey="label"
+                      tick={AXIS_TICK}
+                      tickLine={false}
+                      axisLine={{ stroke: CHART_COLORS.grid }}
+                    />
+                    <YAxis
+                      tick={AXIS_TICK}
+                      width={56}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(value) => formatAxisIDR(Number(value))}
+                    />
+                    <Tooltip
+                      formatter={(value) => formatIDR(Number(value))}
+                      contentStyle={TOOLTIP_STYLE}
+                      cursor={TOOLTIP_CURSOR}
+                    />
+                    <Bar
+                      dataKey="revenue"
+                      name="Omzet"
+                      fill={CHART_COLORS.pandan}
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="expenses"
+                      name="Pengeluaran"
+                      fill={CHART_COLORS.kunyit}
+                      radius={[6, 6, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
 
-            <div>
-              <h3 className="text-sm font-semibold text-stone-900">Pengeluaran per Kategori</h3>
-              {profit.data.expensesByCategory.length === 0 ? (
-                <p className="mt-2 text-sm text-stone-500">
-                  Tidak ada pengeluaran pada periode ini.
-                </p>
-              ) : (
-                <ul className="mt-2 divide-y divide-stone-100">
-                  {profit.data.expensesByCategory.map((row) => (
-                    <li key={row.category} className="flex justify-between py-2 text-sm">
-                      <span>{expenseCategoryLabels[row.category]}</span>
-                      <span className="font-medium">{formatIDR(row.total)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <Card>
+              <CardTitle className="mb-2">Rincian Laba</CardTitle>
+              <ProfitTable rows={chartData} />
+            </Card>
+
+            <Card>
+              <CardTitle className="mb-1">Pengeluaran per Kategori</CardTitle>
+              <ExpenseCategoryList rows={profit.data.expensesByCategory} />
+            </Card>
           </>
         )
       ) : null}
@@ -309,35 +415,44 @@ function ProdukTab({ range }: { range: DateRange }) {
 
   return (
     <div className="space-y-3">
-      {topProducts.isPending ? <Spinner label="Memuat produk terlaris..." /> : null}
+      {topProducts.isPending ? <SkeletonCard lines={6} /> : null}
       {topProducts.isError ? <ErrorNote message="Gagal memuat produk terlaris." /> : null}
 
       {topProducts.data ? (
         items.length === 0 ? (
-          <EmptyNote message="Tidak ada penjualan pada periode ini." />
+          <EmptyRangeCard />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-stone-200 text-left text-xs text-stone-500">
-                  <th className="py-2 pr-2 font-medium">No</th>
-                  <th className="py-2 pr-2 font-medium">Produk</th>
-                  <th className="py-2 pr-2 text-right font-medium">Jumlah Terjual</th>
-                  <th className="py-2 text-right font-medium">Est. Omzet</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((product, index) => (
-                  <tr key={product.productId} className="border-b border-stone-100">
-                    <td className="py-2 pr-2 text-stone-500">{index + 1}</td>
-                    <td className="py-2 pr-2">{product.name}</td>
-                    <td className="py-2 pr-2 text-right">{product.totalQty}</td>
-                    <td className="py-2 text-right">{formatIDR(product.estRevenue)}</td>
+          <Card>
+            <CardTitle className="mb-2">Produk Terlaris</CardTitle>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-cream-300 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-400">
+                    <th className="py-2 pr-3 font-semibold">No</th>
+                    <th className="py-2 pr-2 font-semibold">Produk</th>
+                    <th className="py-2 pr-2 text-right font-semibold">Jumlah Terjual</th>
+                    <th className="py-2 text-right font-semibold">Est. Omzet</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {items.map((product, index) => (
+                    <tr key={product.productId} className="border-b border-cream-200 last:border-0">
+                      <td className="py-2.5 pr-3 font-display text-lg font-semibold text-pandan-700 tabular-nums">
+                        {index + 1}
+                      </td>
+                      <td className="py-2.5 pr-2 text-ink-900">{product.name}</td>
+                      <td className="py-2.5 pr-2 text-right tabular-nums text-ink-700">
+                        {product.totalQty}
+                      </td>
+                      <td className="py-2.5 text-right tabular-nums text-ink-900">
+                        {formatIDR(product.estRevenue)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )
       ) : null}
     </div>
@@ -353,52 +468,45 @@ export function ReportsPage() {
   const range = presets.find((preset) => preset.label === presetLabel)?.range ??
     fallback?.range ?? { from: todayJakarta(), to: todayJakarta() };
 
+  const presetItems: TabItem[] = presets.map((preset) => ({
+    id: preset.label,
+    label: preset.label
+  }));
+
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-stone-900">Laporan</h2>
+    <div>
+      <PageHeader title="Laporan" subtitle="Omzet, laba, dan produk terlaris" />
 
-      <div className="flex gap-1 border-b border-stone-200">
-        {TABS.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => setTab(item.key)}
-            className={`-mb-px rounded-t px-3 py-2 text-sm ${
-              tab === item.key
-                ? "border-x border-t border-stone-200 bg-white font-medium text-emerald-800"
-                : "text-stone-500 hover:text-stone-800"
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className="space-y-4">
+        <Rise>
+          <Tabs items={TABS} activeId={tab} onChange={setTab} />
+        </Rise>
+
+        <Rise>
+          <div className="space-y-1">
+            <FilterChips items={presetItems} activeId={presetLabel} onChange={setPresetLabel} />
+            <p className="text-xs text-ink-400 tabular-nums">
+              {formatDateJakarta(range.from)} – {formatDateJakarta(range.to)}
+            </p>
+          </div>
+        </Rise>
+
+        <Rise>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={tab}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+            >
+              {tab === "omzet" ? <OmzetTab range={range} /> : null}
+              {tab === "laba" ? <LabaTab range={range} /> : null}
+              {tab === "produk" ? <ProdukTab range={range} /> : null}
+            </motion.div>
+          </AnimatePresence>
+        </Rise>
       </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {presets.map((preset) => (
-          <button
-            key={preset.label}
-            type="button"
-            onClick={() => setPresetLabel(preset.label)}
-            className={`rounded-full border px-3 py-1 text-xs ${
-              preset.label === presetLabel
-                ? "border-emerald-700 bg-emerald-700 text-white"
-                : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
-            }`}
-          >
-            {preset.label}
-          </button>
-        ))}
-        <span className="text-xs text-stone-500">
-          {formatDateJakarta(range.from)} – {formatDateJakarta(range.to)}
-        </span>
-      </div>
-
-      <Card>
-        {tab === "omzet" ? <OmzetTab range={range} /> : null}
-        {tab === "laba" ? <LabaTab range={range} /> : null}
-        {tab === "produk" ? <ProdukTab range={range} /> : null}
-      </Card>
     </div>
   );
 }

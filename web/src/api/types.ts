@@ -133,12 +133,29 @@ export interface Product {
   isAvailable: boolean;
   variants: string[];
   notes: string | null;
+  description: string | null;
   updatedAt: string;
 }
 
 export interface ProductsResponse {
   items: Product[];
   pendingMenuChanges: number;
+}
+
+// business_profile rows the bot answers customer questions from. An empty
+// value means "not provided" — the bot deflects that topic to admin.
+export interface BusinessProfileEntry {
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
+export interface BusinessProfileResponse {
+  items: BusinessProfileEntry[];
+}
+
+export interface BusinessProfileUpdateResponse {
+  item: BusinessProfileEntry;
 }
 
 export interface Expense {

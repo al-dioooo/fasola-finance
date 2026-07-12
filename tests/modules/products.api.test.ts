@@ -64,7 +64,8 @@ describe("products API", () => {
         category: "  Paket Nasi  ",
         aliases: [" nasi ayam ", "nasi ayam", "nasbak", " "],
         variants: ["Pedas", "Original", " Pedas "],
-        notes: "   "
+        notes: "   ",
+        description: "  Ayam bakar bumbu kecap dengan nasi, lalapan, dan sambal.  "
       }
     });
 
@@ -79,6 +80,7 @@ describe("products API", () => {
     expect(created.aliases).toEqual(["nasi ayam", "nasbak"]);
     expect(created.variants).toEqual(["Pedas", "Original"]);
     expect(created.notes).toBeNull();
+    expect(created.description).toBe("Ayam bakar bumbu kecap dengan nasi, lalapan, dan sambal.");
     expect(created.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     const second = await app.inject({
@@ -101,6 +103,7 @@ describe("products API", () => {
     expect(secondProduct.variants).toEqual([]);
     expect(secondProduct.category).toBeNull();
     expect(secondProduct.notes).toBeNull();
+    expect(secondProduct.description).toBeNull();
   });
 
   it("rejects a duplicate product name case-insensitively with 409", async () => {
@@ -225,6 +228,38 @@ describe("products API", () => {
     expect(persisted?.price).toBe(27000);
     expect(persisted?.stockStatus).toBe("Limited");
     expect(persisted?.isAvailable).toBe(true);
+  });
+
+  it("patches description and clears it back to null", async () => {
+    const set = await app.inject({
+      method: "PATCH",
+      url: "/api/products/PRD-002",
+      headers: { cookie },
+      payload: { description: "  Es teh manis segar, gula asli.  " }
+    });
+
+    expect(set.statusCode).toBe(200);
+    expect(set.json<ProductBody>().product.description).toBe("Es teh manis segar, gula asli.");
+
+    // Other fields untouched by a description-only patch.
+    expect(set.json<ProductBody>().product.productName).toBe("Es Teh Manis");
+    expect(set.json<ProductBody>().product.price).toBe(5000);
+
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: "/api/products/PRD-002",
+      headers: { cookie },
+      payload: { description: "" }
+    });
+
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json<ProductBody>().product.description).toBeNull();
+
+    const list = await app.inject({ method: "GET", url: "/api/products", headers: { cookie } });
+    const persisted = list
+      .json<ProductsListBody>()
+      .items.find((item) => item.productId === "PRD-002");
+    expect(persisted?.description).toBeNull();
   });
 
   it("rejects renaming to another product's name (409) but allows keeping its own", async () => {

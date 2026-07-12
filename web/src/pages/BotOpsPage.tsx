@@ -1,40 +1,63 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 
 import { api, buildQuery } from "../api/client";
 import type {
+  AiLogItem,
   AiLogsResponse,
   BotHealthResponse,
   BotLoginResponse,
   BotStatusResponse,
   HandoffItem,
   HandoffResponse,
+  MessageLogItem,
   MessagesResponse
 } from "../api/types";
-import { Badge, Card, EmptyNote, ErrorNote, Spinner } from "../components/ui";
+import { Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
+import {
+  Badge,
+  Button,
+  Card,
+  CardTitle,
+  EmptyState,
+  ErrorNote,
+  Field,
+  Input,
+  PageHeader,
+  Pagination,
+  Select,
+  Skeleton,
+  SkeletonCard,
+  SkeletonRows,
+  Tabs
+} from "../components/ui";
 import { formatDateTimeJakarta } from "../lib/format";
 
-const TABS = [
-  { key: "status", label: "Status & QR" },
-  { key: "handoff", label: "Perlu Bantuan" },
-  { key: "messages", label: "Log Pesan" },
-  { key: "ai", label: "Log AI" }
+const TAB_ITEMS = [
+  { id: "status", label: "Status & QR" },
+  { id: "handoff", label: "Perlu Bantuan" },
+  { id: "messages", label: "Log Pesan" },
+  { id: "ai", label: "Log AI" }
 ] as const;
 
-type TabKey = (typeof TABS)[number]["key"];
+type TabKey = (typeof TAB_ITEMS)[number]["id"];
 
 const LOG_PAGE_LIMIT = 25;
 
-const primaryButtonClass =
-  "rounded bg-emerald-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50";
-const secondaryButtonClass =
-  "rounded border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50";
-const dangerButtonClass =
-  "rounded border border-rose-300 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50";
-const inputClass = "w-full rounded border border-stone-300 px-2 py-1.5 text-sm";
-const thClass = "px-2 py-1.5 text-left font-medium text-stone-600";
-const tdClass = "px-2 py-1.5 align-top";
+// Table cells share one treatment across "Log Pesan" and "Log AI".
+const TH_BASE =
+  "sticky top-0 z-10 border-b border-cream-200 bg-cream-50 px-2.5 py-2 text-xs font-semibold tracking-wide text-ink-500 uppercase whitespace-nowrap";
+const thLeft = `${TH_BASE} text-left`;
+const thRight = `${TH_BASE} text-right`;
+const tdClass = "border-b border-cream-100 px-2.5 py-2 align-top text-ink-700";
+
+// Link-shaped buttons keep real anchor semantics (router link / wa.me new tab).
+const ghostLinkClasses =
+  "inline-flex items-center justify-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-pandan-700 transition-colors hover:bg-pandan-50";
+const secondaryLinkClasses =
+  "inline-flex items-center justify-center gap-2 rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-semibold text-ink-900 shadow-card transition-colors hover:border-pandan-300 hover:bg-pandan-50";
 
 // Local UI copy for the bot's message processing statuses (enum values stay English).
 const processingStatusLabels: Record<string, string> = {
@@ -46,15 +69,6 @@ const processingStatusLabels: Record<string, string> = {
   Unsupported: "Tidak Didukung"
 };
 
-const processingStatusBadgeClasses: Record<string, string> = {
-  Received: "bg-sky-100 text-sky-800",
-  Ignored: "bg-stone-200 text-stone-600",
-  Success: "bg-emerald-100 text-emerald-800",
-  Failed: "bg-rose-100 text-rose-800",
-  Duplicate: "bg-amber-100 text-amber-800",
-  Unsupported: "bg-stone-200 text-stone-600"
-};
-
 const PROCESSING_STATUS_OPTIONS = [
   "Received",
   "Ignored",
@@ -63,6 +77,15 @@ const PROCESSING_STATUS_OPTIONS = [
   "Duplicate",
   "Unsupported"
 ];
+
+interface BadgeTone {
+  badge: string;
+  dot: string;
+}
+
+const TONE_OK: BadgeTone = { badge: "bg-pandan-100 text-pandan-800", dot: "bg-pandan-500" };
+const TONE_DOWN: BadgeTone = { badge: "bg-sambal-100 text-sambal-800", dot: "bg-sambal-500" };
+const TONE_NEUTRAL: BadgeTone = { badge: "bg-cream-200 text-ink-500", dot: "bg-ink-400" };
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Terjadi kesalahan yang tidak diketahui";
@@ -82,73 +105,129 @@ function waMeLink(customerWa: string): string {
   return `https://wa.me/${beforeAt.replace(/\D/g, "")}`;
 }
 
-function ProcessingStatusBadge({ status }: { status: string }) {
+function DotBadge({ tone, children }: { tone: BadgeTone; children: ReactNode }) {
   return (
-    <Badge className={processingStatusBadgeClasses[status] ?? "bg-stone-200 text-stone-600"}>
-      {processingStatusLabels[status] ?? status}
+    <Badge className={tone.badge}>
+      <span aria-hidden className={`size-1.5 rounded-full ${tone.dot}`} />
+      {children}
     </Badge>
   );
 }
 
-function Pager({
-  page,
-  limit,
-  total,
-  onPageChange
-}: {
-  page: number;
-  limit: number;
-  total: number;
-  onPageChange: (page: number) => void;
-}) {
-  const totalPages = Math.max(1, Math.ceil(total / limit));
+function ProcessingStatusBadge({ status }: { status: string }) {
+  const tone = status === "Success" ? TONE_OK : status === "Failed" ? TONE_DOWN : TONE_NEUTRAL;
+
+  return <DotBadge tone={tone}>{processingStatusLabels[status] ?? status}</DotBadge>;
+}
+
+// ---------------------------------------------------------------------------
+// Tab "Status & QR"
+// ---------------------------------------------------------------------------
+
+function HealthPill({ label, state }: { label: string; state: "ok" | "down" | undefined }) {
+  const tone = state === "ok" ? TONE_OK : state === "down" ? TONE_DOWN : TONE_NEUTRAL;
+  const text = state === "ok" ? "Aktif" : state === "down" ? "Mati" : "Memeriksa...";
 
   return (
-    <div className="mt-3 flex items-center justify-between text-sm">
-      <span className="text-stone-500">
-        Halaman {page} dari {totalPages} ({total} data)
-      </span>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className={secondaryButtonClass}
-          disabled={page <= 1}
-          onClick={() => onPageChange(page - 1)}
-        >
-          Sebelumnya
-        </button>
-        <button
-          type="button"
-          className={secondaryButtonClass}
-          disabled={page >= totalPages}
-          onClick={() => onPageChange(page + 1)}
-        >
-          Berikutnya
-        </button>
-      </div>
+    <DotBadge tone={tone}>
+      {label}: {text}
+    </DotBadge>
+  );
+}
+
+// Thin bar that drains linearly over the QR lifetime; re-keyed per issued QR.
+function QrCountdownBar({ durationSeconds }: { durationSeconds: number }) {
+  return (
+    <div className="h-1.5 w-56 max-w-full overflow-hidden rounded-full bg-cream-200">
+      <motion.div
+        className="h-full rounded-full bg-pandan-500"
+        initial={{ width: "100%" }}
+        animate={{ width: "0%" }}
+        transition={{ duration: durationSeconds, ease: "linear" }}
+      />
     </div>
   );
 }
 
-function HealthPill({ label, state }: { label: string; state: "ok" | "down" | undefined }) {
-  const className =
-    state === "ok"
-      ? "bg-emerald-100 text-emerald-800"
-      : state === "down"
-        ? "bg-rose-100 text-rose-800"
-        : "bg-stone-200 text-stone-600";
-  const text = state === "ok" ? "Aktif" : state === "down" ? "Mati" : "Memeriksa...";
+function QrPanel({
+  qr,
+  qrIssuedAt,
+  secondsLeft,
+  reloadPending,
+  onReload
+}: {
+  qr: BotLoginResponse;
+  qrIssuedAt: number;
+  secondsLeft: number;
+  reloadPending: boolean;
+  onReload: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ type: "spring", stiffness: 260, damping: 30 }}
+      className="overflow-hidden"
+    >
+      <div className="mt-4 rounded-card border border-cream-200 bg-white p-5 shadow-card">
+        {secondsLeft > 0 ? (
+          <div className="flex flex-col items-center gap-3">
+            <img
+              src={qr.qrImageDataUrl}
+              alt="QR pairing WhatsApp"
+              className="h-56 w-56 max-w-full rounded-xl border border-cream-200"
+            />
+            <QrCountdownBar key={qrIssuedAt} durationSeconds={qr.durationSeconds} />
+            <p className="text-center text-sm text-ink-500">
+              Pindai dengan WhatsApp. QR kedaluwarsa dalam{" "}
+              <span className="font-semibold text-ink-900 tabular-nums">{secondsLeft}</span> detik.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-2 py-2">
+            <Button variant="secondary" loading={reloadPending} onClick={onReload}>
+              QR kedaluwarsa — muat ulang
+            </Button>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+function ConnectionSummary({ status }: { status: BotStatusResponse }) {
+  const connected = status.connected;
 
   return (
-    <Badge className={className}>
-      {label}: {text}
-    </Badge>
+    <div className="space-y-3">
+      {!status.gowaReachable ? (
+        <ErrorNote message="GoWA tidak dapat dihubungi — periksa layanan GoWA di server." />
+      ) : null}
+
+      <DotBadge tone={connected ? TONE_OK : TONE_DOWN}>
+        {connected ? "Terhubung" : "Terputus"}
+      </DotBadge>
+
+      {status.devices.length > 0 ? (
+        <ul className="space-y-1 text-sm text-ink-500">
+          {status.devices.map((device) => (
+            <li key={device.device}>
+              <span className="font-medium text-ink-900">{device.name}</span> — {device.device}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-ink-500">Tidak ada perangkat yang terhubung.</p>
+      )}
+    </div>
   );
 }
 
 function StatusTab() {
   const queryClient = useQueryClient();
   const [qr, setQr] = useState<BotLoginResponse | null>(null);
+  const [qrIssuedAt, setQrIssuedAt] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   const qrActive = qr !== null && secondsLeft > 0;
@@ -170,6 +249,7 @@ function StatusTab() {
     mutationFn: () => api<BotLoginResponse>("/api/bot/login", { method: "POST" }),
     onSuccess: (data) => {
       setQr(data);
+      setQrIssuedAt(Date.now());
       setSecondsLeft(data.durationSeconds);
     }
   });
@@ -213,7 +293,7 @@ function StatusTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-stone-700">Kesehatan Sistem</h2>
+        <CardTitle className="mb-3">Kesehatan Sistem</CardTitle>
         {health.isError ? (
           <ErrorNote message={`Gagal memuat status kesehatan: ${errorText(health.error)}`} />
         ) : (
@@ -226,64 +306,33 @@ function StatusTab() {
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-stone-700">Koneksi WhatsApp</h2>
+        <CardTitle className="mb-3">Koneksi WhatsApp</CardTitle>
 
         {status.isPending ? (
-          <Spinner label="Memuat status koneksi..." />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="h-4 w-52" />
+          </div>
         ) : status.isError ? (
           <ErrorNote message={`Gagal memuat status: ${errorText(status.error)}`} />
         ) : (
-          <div className="space-y-3">
-            {!status.data.gowaReachable ? (
-              <ErrorNote message="GoWA tidak dapat dihubungi — periksa layanan GoWA di server." />
-            ) : null}
-
-            <div className="flex items-center gap-2">
-              <Badge
-                className={
-                  connected ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
-                }
-              >
-                {connected ? "Terhubung" : "Terputus"}
-              </Badge>
-            </div>
-
-            {status.data.devices.length > 0 ? (
-              <ul className="space-y-1 text-sm text-stone-600">
-                {status.data.devices.map((device) => (
-                  <li key={device.device}>
-                    <span className="font-medium text-stone-800">{device.name}</span> —{" "}
-                    {device.device}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-stone-500">Tidak ada perangkat yang terhubung.</p>
-            )}
-          </div>
+          <ConnectionSummary status={status.data} />
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={primaryButtonClass}
-            disabled={login.isPending}
-            onClick={() => login.mutate()}
-          >
+          <Button variant="primary" loading={login.isPending} onClick={() => login.mutate()}>
             {login.isPending ? "Memuat QR..." : "Tampilkan QR"}
-          </button>
-          <button
-            type="button"
-            className={secondaryButtonClass}
-            disabled={reconnect.isPending}
+          </Button>
+          <Button
+            variant="secondary"
+            loading={reconnect.isPending}
             onClick={() => reconnect.mutate()}
           >
             {reconnect.isPending ? "Menyambungkan..." : "Sambungkan Ulang"}
-          </button>
-          <button
-            type="button"
-            className={dangerButtonClass}
-            disabled={logout.isPending}
+          </Button>
+          <Button
+            variant="dangerOutline"
+            loading={logout.isPending}
             onClick={() => {
               if (
                 window.confirm("Yakin? Bot akan terputus dari WhatsApp dan harus scan QR lagi.")
@@ -293,7 +342,7 @@ function StatusTab() {
             }}
           >
             {logout.isPending ? "Memutuskan..." : "Putuskan (Logout)"}
-          </button>
+          </Button>
         </div>
 
         {login.isError ? (
@@ -312,33 +361,44 @@ function StatusTab() {
           </div>
         ) : null}
 
-        {qr !== null ? (
-          <div className="mt-4 flex flex-col items-center gap-2">
-            {secondsLeft > 0 ? (
-              <>
-                <img
-                  src={qr.qrImageDataUrl}
-                  alt="QR pairing WhatsApp"
-                  className="h-56 w-56 rounded border border-stone-200"
-                />
-                <p className="text-sm text-stone-600">
-                  Pindai dengan WhatsApp. QR kedaluwarsa dalam {secondsLeft} detik.
-                </p>
-              </>
-            ) : (
-              <button
-                type="button"
-                className={secondaryButtonClass}
-                disabled={login.isPending}
-                onClick={() => login.mutate()}
-              >
-                QR kedaluwarsa — muat ulang
-              </button>
-            )}
-          </div>
-        ) : null}
+        <AnimatePresence initial={false}>
+          {qr !== null ? (
+            <QrPanel
+              key="qr-panel"
+              qr={qr}
+              qrIssuedAt={qrIssuedAt}
+              secondsLeft={secondsLeft}
+              reloadPending={login.isPending}
+              onReload={() => login.mutate()}
+            />
+          ) : null}
+        </AnimatePresence>
       </Card>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab "Perlu Bantuan"
+// ---------------------------------------------------------------------------
+
+function RecentMessages({ messages }: { messages: MessageLogItem[] }) {
+  if (messages.length === 0) {
+    return <p className="mt-2 text-sm text-ink-500">Belum ada pesan tercatat.</p>;
+  }
+
+  return (
+    <ul className="mt-2 space-y-2">
+      {messages.map((message) => (
+        <li key={message.messageId} className="rounded-xl bg-cream-100 p-3 text-sm">
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+            <span>{formatDateTimeJakarta(message.receivedAt)}</span>
+            <ProcessingStatusBadge status={message.processingStatus} />
+          </div>
+          <p className="whitespace-pre-wrap text-ink-700">{message.messageText ?? "(tanpa teks)"}</p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -347,56 +407,37 @@ function HandoffCard({ item }: { item: HandoffItem }) {
 
   return (
     <Card>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-stone-800">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-display text-lg font-semibold text-ink-900">
             {order.customerName ?? order.customerWa}
           </p>
-          <p className="text-xs text-stone-500">
+          <p className="mt-0.5 text-xs text-ink-500">
             {order.orderId} · {formatDateTimeJakarta(order.createdAt)}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link
-            to={`/orders/${order.orderId}`}
-            className="rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-50"
-          >
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={`/orders/${order.orderId}`} className={ghostLinkClasses}>
             Lihat Pesanan
           </Link>
           <a
             href={waMeLink(order.customerWa)}
             target="_blank"
             rel="noreferrer"
-            className="rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-50"
+            className={secondaryLinkClasses}
           >
             Balas via WhatsApp
           </a>
         </div>
       </div>
 
-      <p className="mt-2 text-sm text-stone-700">{order.productsText}</p>
+      <p className="mt-3 text-sm text-ink-700">{order.productsText}</p>
 
-      <details className="mt-2">
-        <summary className="cursor-pointer text-sm text-emerald-800">
+      <details className="mt-3">
+        <summary className="cursor-pointer text-sm font-semibold text-pandan-700 hover:text-pandan-800">
           Pesan terakhir ({recentMessages.length})
         </summary>
-        {recentMessages.length === 0 ? (
-          <p className="mt-2 text-sm text-stone-500">Belum ada pesan tercatat.</p>
-        ) : (
-          <ul className="mt-2 space-y-2">
-            {recentMessages.map((message) => (
-              <li key={message.messageId} className="rounded bg-stone-50 p-2 text-sm">
-                <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-stone-500">
-                  <span>{formatDateTimeJakarta(message.receivedAt)}</span>
-                  <ProcessingStatusBadge status={message.processingStatus} />
-                </div>
-                <p className="whitespace-pre-wrap text-stone-700">
-                  {message.messageText ?? "(tanpa teks)"}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
+        <RecentMessages messages={recentMessages} />
       </details>
     </Card>
   );
@@ -409,7 +450,12 @@ function HandoffTab() {
   });
 
   if (handoff.isPending) {
-    return <Spinner label="Memuat daftar bantuan..." />;
+    return (
+      <div className="space-y-3">
+        <SkeletonCard lines={3} />
+        <SkeletonCard lines={3} />
+      </div>
+    );
   }
 
   if (handoff.isError) {
@@ -417,17 +463,27 @@ function HandoffTab() {
   }
 
   if (handoff.data.items.length === 0) {
-    return <EmptyNote message="Tidak ada yang perlu bantuan 🎉" />;
+    return (
+      <Card>
+        <EmptyState emoji="🎉" message="Tidak ada yang perlu bantuan." />
+      </Card>
+    );
   }
 
   return (
-    <div className="space-y-3">
+    <StaggerList className="space-y-3">
       {handoff.data.items.map((item) => (
-        <HandoffCard key={item.order.orderId} item={item} />
+        <StaggerItem key={item.order.orderId}>
+          <HandoffCard item={item} />
+        </StaggerItem>
       ))}
-    </div>
+    </StaggerList>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Tab "Log Pesan"
+// ---------------------------------------------------------------------------
 
 interface MessageFilters {
   customerWa: string;
@@ -442,6 +498,107 @@ const emptyMessageFilters: MessageFilters = {
   from: "",
   to: ""
 };
+
+function MessageFilterForm({
+  draft,
+  onDraftChange,
+  onApply,
+  onReset
+}: {
+  draft: MessageFilters;
+  onDraftChange: (draft: MessageFilters) => void;
+  onApply: (event: FormEvent<HTMLFormElement>) => void;
+  onReset: () => void;
+}) {
+  return (
+    <form onSubmit={onApply} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <Field label="Nomor WA">
+        <Input
+          type="text"
+          placeholder="Nomor WA customer"
+          value={draft.customerWa}
+          onChange={(event) => onDraftChange({ ...draft, customerWa: event.target.value })}
+        />
+      </Field>
+      <Field label="Status">
+        <Select
+          value={draft.processingStatus}
+          onChange={(event) => onDraftChange({ ...draft, processingStatus: event.target.value })}
+        >
+          <option value="">Semua Status</option>
+          {PROCESSING_STATUS_OPTIONS.map((value) => (
+            <option key={value} value={value}>
+              {processingStatusLabels[value] ?? value}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Dari Tanggal">
+        <Input
+          type="date"
+          value={draft.from}
+          onChange={(event) => onDraftChange({ ...draft, from: event.target.value })}
+        />
+      </Field>
+      <Field label="Sampai Tanggal">
+        <Input
+          type="date"
+          value={draft.to}
+          onChange={(event) => onDraftChange({ ...draft, to: event.target.value })}
+        />
+      </Field>
+      <div className="flex items-end gap-2">
+        <Button type="submit" variant="primary">
+          Terapkan
+        </Button>
+        <Button variant="secondary" onClick={onReset}>
+          Reset
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function MessagesTable({ items }: { items: MessageLogItem[] }) {
+  return (
+    <div className="max-h-[70vh] overflow-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <th className={thLeft}>Waktu</th>
+            <th className={thLeft}>Customer</th>
+            <th className={thLeft}>Tipe</th>
+            <th className={thLeft}>Pesan</th>
+            <th className={thLeft}>Intent</th>
+            <th className={thLeft}>Status</th>
+            <th className={thLeft}>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((message) => (
+            <tr key={message.messageId}>
+              <td className={`${tdClass} whitespace-nowrap`}>
+                {formatDateTimeJakarta(message.receivedAt)}
+              </td>
+              <td className={tdClass}>{message.customerWa}</td>
+              <td className={tdClass}>{message.messageType}</td>
+              <td className={tdClass} title={message.messageText ?? undefined}>
+                {truncateText(message.messageText)}
+              </td>
+              <td className={tdClass}>{message.detectedIntent ?? "—"}</td>
+              <td className={tdClass}>
+                <ProcessingStatusBadge status={message.processingStatus} />
+              </td>
+              <td className={tdClass} title={message.errorMessage ?? undefined}>
+                {truncateText(message.errorMessage, 40)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function MessagesTab() {
   const [draft, setDraft] = useState<MessageFilters>(emptyMessageFilters);
@@ -470,109 +627,37 @@ function MessagesTab() {
     setPage(1);
   }
 
+  function resetFilters() {
+    setDraft(emptyMessageFilters);
+    setApplied(emptyMessageFilters);
+    setPage(1);
+  }
+
   return (
     <div className="space-y-3">
       <Card>
-        <form onSubmit={applyFilters} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          <input
-            type="text"
-            className={inputClass}
-            placeholder="Nomor WA customer"
-            value={draft.customerWa}
-            onChange={(event) => setDraft({ ...draft, customerWa: event.target.value })}
-          />
-          <select
-            className={inputClass}
-            value={draft.processingStatus}
-            onChange={(event) => setDraft({ ...draft, processingStatus: event.target.value })}
-          >
-            <option value="">Semua Status</option>
-            {PROCESSING_STATUS_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {processingStatusLabels[value] ?? value}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            className={inputClass}
-            aria-label="Dari tanggal"
-            value={draft.from}
-            onChange={(event) => setDraft({ ...draft, from: event.target.value })}
-          />
-          <input
-            type="date"
-            className={inputClass}
-            aria-label="Sampai tanggal"
-            value={draft.to}
-            onChange={(event) => setDraft({ ...draft, to: event.target.value })}
-          />
-          <div className="flex gap-2">
-            <button type="submit" className={primaryButtonClass}>
-              Terapkan
-            </button>
-            <button
-              type="button"
-              className={secondaryButtonClass}
-              onClick={() => {
-                setDraft(emptyMessageFilters);
-                setApplied(emptyMessageFilters);
-                setPage(1);
-              }}
-            >
-              Reset
-            </button>
-          </div>
-        </form>
+        <MessageFilterForm
+          draft={draft}
+          onDraftChange={setDraft}
+          onApply={applyFilters}
+          onReset={resetFilters}
+        />
       </Card>
 
       {messages.isPending ? (
-        <Spinner label="Memuat log pesan..." />
+        <Card>
+          <SkeletonRows rows={6} />
+        </Card>
       ) : messages.isError ? (
         <ErrorNote message={`Gagal memuat log pesan: ${errorText(messages.error)}`} />
       ) : (
         <Card>
           {messages.data.items.length === 0 ? (
-            <EmptyNote message="Tidak ada pesan yang cocok dengan filter." />
+            <EmptyState message="Tidak ada pesan yang cocok dengan filter." />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-stone-200">
-                    <th className={thClass}>Waktu</th>
-                    <th className={thClass}>Customer</th>
-                    <th className={thClass}>Tipe</th>
-                    <th className={thClass}>Pesan</th>
-                    <th className={thClass}>Intent</th>
-                    <th className={thClass}>Status</th>
-                    <th className={thClass}>Error</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {messages.data.items.map((message) => (
-                    <tr key={message.messageId} className="border-b border-stone-100">
-                      <td className={`${tdClass} whitespace-nowrap`}>
-                        {formatDateTimeJakarta(message.receivedAt)}
-                      </td>
-                      <td className={tdClass}>{message.customerWa}</td>
-                      <td className={tdClass}>{message.messageType}</td>
-                      <td className={tdClass} title={message.messageText ?? undefined}>
-                        {truncateText(message.messageText)}
-                      </td>
-                      <td className={tdClass}>{message.detectedIntent ?? "—"}</td>
-                      <td className={tdClass}>
-                        <ProcessingStatusBadge status={message.processingStatus} />
-                      </td>
-                      <td className={tdClass} title={message.errorMessage ?? undefined}>
-                        {truncateText(message.errorMessage, 40)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <MessagesTable items={messages.data.items} />
           )}
-          <Pager
+          <Pagination
             page={messages.data.page}
             limit={messages.data.limit}
             total={messages.data.total}
@@ -580,6 +665,49 @@ function MessagesTab() {
           />
         </Card>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab "Log AI"
+// ---------------------------------------------------------------------------
+
+function AiLogsTable({ items }: { items: AiLogItem[] }) {
+  return (
+    <div className="max-h-[70vh] overflow-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <th className={thLeft}>Waktu</th>
+            <th className={thLeft}>Model</th>
+            <th className={thLeft}>Intent</th>
+            <th className={thRight}>Confidence</th>
+            <th className={thLeft}>Validasi</th>
+            <th className={thLeft}>Handoff</th>
+            <th className={thRight}>Latency</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((log) => (
+            <tr key={log.logId}>
+              <td className={`${tdClass} whitespace-nowrap`}>
+                {formatDateTimeJakarta(log.createdAt)}
+              </td>
+              <td className={tdClass}>{log.model}</td>
+              <td className={tdClass}>{log.intent ?? "—"}</td>
+              <td className={`${tdClass} text-right tabular-nums`}>
+                {log.confidence !== null ? log.confidence.toFixed(2) : "—"}
+              </td>
+              <td className={tdClass}>{log.validationStatus}</td>
+              <td className={tdClass}>{log.handoffTriggered ? "Ya" : "Tidak"}</td>
+              <td className={`${tdClass} text-right whitespace-nowrap tabular-nums`}>
+                {log.latencyMs !== null ? `${log.latencyMs} ms` : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -595,7 +723,11 @@ function AiLogsTab() {
   });
 
   if (aiLogs.isPending) {
-    return <Spinner label="Memuat log AI..." />;
+    return (
+      <Card>
+        <SkeletonRows rows={6} />
+      </Card>
+    );
   }
 
   if (aiLogs.isError) {
@@ -604,45 +736,19 @@ function AiLogsTab() {
 
   if (aiLogs.data.total === 0) {
     return (
-      <EmptyNote message="Bot belum menulis log AI — tabel ini akan terisi setelah fitur bot diaktifkan." />
+      <Card>
+        <EmptyState
+          emoji="🤖"
+          message="Bot belum menulis log AI — tabel ini akan terisi setelah fitur bot diaktifkan."
+        />
+      </Card>
     );
   }
 
   return (
     <Card>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-stone-200">
-              <th className={thClass}>Waktu</th>
-              <th className={thClass}>Model</th>
-              <th className={thClass}>Intent</th>
-              <th className={thClass}>Confidence</th>
-              <th className={thClass}>Validasi</th>
-              <th className={thClass}>Handoff</th>
-              <th className={thClass}>Latency</th>
-            </tr>
-          </thead>
-          <tbody>
-            {aiLogs.data.items.map((log) => (
-              <tr key={log.logId} className="border-b border-stone-100">
-                <td className={`${tdClass} whitespace-nowrap`}>
-                  {formatDateTimeJakarta(log.createdAt)}
-                </td>
-                <td className={tdClass}>{log.model}</td>
-                <td className={tdClass}>{log.intent ?? "—"}</td>
-                <td className={tdClass}>
-                  {log.confidence !== null ? log.confidence.toFixed(2) : "—"}
-                </td>
-                <td className={tdClass}>{log.validationStatus}</td>
-                <td className={tdClass}>{log.handoffTriggered ? "Ya" : "Tidak"}</td>
-                <td className={tdClass}>{log.latencyMs !== null ? `${log.latencyMs} ms` : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager
+      <AiLogsTable items={aiLogs.data.items} />
+      <Pagination
         page={aiLogs.data.page}
         limit={aiLogs.data.limit}
         total={aiLogs.data.total}
@@ -652,32 +758,32 @@ function AiLogsTab() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export function BotOpsPage() {
   const [tab, setTab] = useState<TabKey>("status");
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1 border-b border-stone-200 pb-2">
-        {TABS.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => setTab(item.key)}
-            className={`rounded px-3 py-1.5 text-sm ${
-              tab === item.key
-                ? "bg-emerald-800 font-medium text-white"
-                : "text-stone-600 hover:bg-stone-100"
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+    <div>
+      <Rise>
+        <PageHeader
+          title="Bot WhatsApp"
+          subtitle="Pantau koneksi, log pesan, dan permintaan bantuan pelanggan."
+        />
+      </Rise>
 
-      {tab === "status" ? <StatusTab /> : null}
-      {tab === "handoff" ? <HandoffTab /> : null}
-      {tab === "messages" ? <MessagesTab /> : null}
-      {tab === "ai" ? <AiLogsTab /> : null}
+      <Rise className="mb-4">
+        <Tabs items={TAB_ITEMS} activeId={tab} onChange={setTab} />
+      </Rise>
+
+      <Rise>
+        {tab === "status" ? <StatusTab /> : null}
+        {tab === "handoff" ? <HandoffTab /> : null}
+        {tab === "messages" ? <MessagesTab /> : null}
+        {tab === "ai" ? <AiLogsTab /> : null}
+      </Rise>
     </div>
   );
 }

@@ -1,26 +1,29 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "motion/react";
 
 import { api, ApiError, buildQuery } from "../api/client";
 import type { Expense, ExpenseCategory, ExpensesResponse } from "../api/types";
-import { Card, EmptyNote, ErrorNote, Spinner } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  CardTitle,
+  EmptyState,
+  ErrorNote,
+  Field,
+  Input,
+  PageHeader,
+  Pagination,
+  Select,
+  SkeletonRows
+} from "../components/ui";
+import { AnimatedNumber, Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
 import { formatDateJakarta, formatIDR, todayJakarta } from "../lib/format";
 import { expenseCategoryLabels } from "../lib/labels";
 
 const PAGE_LIMIT = 20;
-
-const INPUT_CLASS =
-  "w-full rounded border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 " +
-  "focus:border-emerald-600 focus:outline-none";
-
-const PRIMARY_BUTTON_CLASS =
-  "rounded bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 " +
-  "disabled:cursor-not-allowed disabled:opacity-50";
-
-const SECONDARY_BUTTON_CLASS =
-  "rounded border border-stone-300 px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-100 " +
-  "disabled:cursor-not-allowed disabled:opacity-50";
 
 interface CategoryOption {
   value: ExpenseCategory;
@@ -94,24 +97,269 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
-function AmountHint({ amount }: { amount: string }) {
-  const parsed = parseAmount(amount);
-
-  if (parsed === null) {
-    return null;
-  }
-
-  return <p className="mt-1 text-xs text-stone-500">{formatIDR(parsed)}</p>;
+// Shared <option> list for every category select on the page.
+function CategoryOptions({ options }: { options: CategoryOption[] }) {
+  return (
+    <>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </>
+  );
 }
 
-export function ExpensesPage() {
-  const queryClient = useQueryClient();
+// Numeric rupiah input with an "Rp" prefix affordance and a live formatted hint.
+function AmountField({
+  label,
+  value,
+  onChange,
+  placeholder
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const parsed = parseAmount(value);
 
-  // Quick-add form.
+  return (
+    <Field label={label} {...(parsed === null ? {} : { hint: formatIDR(parsed) })}>
+      <div className="relative">
+        <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-sm font-medium text-ink-400">
+          Rp
+        </span>
+        <Input
+          type="text"
+          inputMode="numeric"
+          required
+          value={value}
+          onChange={(event) => onChange(onlyDigits(event.target.value))}
+          className="pl-10"
+          {...(placeholder ? { placeholder } : {})}
+        />
+      </div>
+    </Field>
+  );
+}
+
+// Pandan-tinted quick-add card; owns its own form state so a successful save
+// can reset amount/description without touching the rest of the page.
+function QuickAddCard({
+  categoryOptions,
+  onSaved
+}: {
+  categoryOptions: CategoryOption[];
+  onSaved: () => Promise<void>;
+}) {
   const [expenseDate, setExpenseDate] = useState(() => todayJakarta());
   const [category, setCategory] = useState<ExpenseCategory>("bahan_baku");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+
+  const createMutation = useMutation({
+    mutationFn: (body: CreateExpenseBody) =>
+      api<{ expense: Expense }>("/api/expenses", { method: "POST", body }),
+    onSuccess: async () => {
+      setAmount("");
+      setDescription("");
+      await onSaved();
+    }
+  });
+
+  function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountValue = parseAmount(amount);
+
+    if (amountValue === null) {
+      return;
+    }
+
+    const trimmed = description.trim();
+    createMutation.mutate({
+      expenseDate,
+      category,
+      amount: amountValue,
+      ...(trimmed === "" ? {} : { description: trimmed })
+    });
+  }
+
+  return (
+    <section className="rounded-card border border-pandan-200 bg-pandan-50 p-4 shadow-card sm:p-5">
+      <CardTitle>Tambah Pengeluaran</CardTitle>
+      <form onSubmit={handleCreate} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Tanggal">
+          <Input
+            type="date"
+            required
+            value={expenseDate}
+            onChange={(event) => setExpenseDate(event.target.value)}
+          />
+        </Field>
+        <Field label="Kategori">
+          <Select
+            value={category}
+            onChange={(event) => setCategory(event.target.value as ExpenseCategory)}
+          >
+            <CategoryOptions options={categoryOptions} />
+          </Select>
+        </Field>
+        <AmountField label="Jumlah" value={amount} onChange={setAmount} placeholder="cth. 50000" />
+        <Field label="Keterangan (opsional)">
+          <Input
+            type="text"
+            placeholder="cth. Belanja ayam 5 kg"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </Field>
+        <div className="sm:col-span-2">
+          <Button
+            type="submit"
+            loading={createMutation.isPending}
+            disabled={parseAmount(amount) === null}
+          >
+            Simpan
+          </Button>
+        </div>
+        <AnimatePresence>
+          {createMutation.isError ? (
+            <motion.div
+              className="sm:col-span-2"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+            >
+              <ErrorNote
+                message={errorMessage(createMutation.error, "Gagal menyimpan pengeluaran.")}
+              />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </form>
+    </section>
+  );
+}
+
+// Read-only expense row: muted date, kunyit category badge, right-aligned amount.
+function ExpenseRow({
+  expense,
+  onEdit,
+  onDelete,
+  deleting
+}: {
+  expense: Expense;
+  onEdit: () => void;
+  onDelete: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs tabular-nums text-ink-400">
+            {formatDateJakarta(expense.expenseDate)}
+          </span>
+          <Badge className="bg-kunyit-100 text-kunyit-800">
+            {expenseCategoryLabels[expense.category]}
+          </Badge>
+        </div>
+        <p className="mt-1 text-sm text-ink-600">{expense.description ?? "—"}</p>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <span className="font-display text-base font-semibold tabular-nums text-ink-900">
+          {formatIDR(expense.amount)}
+        </span>
+        <div className="flex gap-1.5">
+          <Button variant="ghost" size="sm" onClick={onEdit}>
+            Edit
+          </Button>
+          <Button variant="dangerOutline" size="sm" onClick={onDelete} disabled={deleting}>
+            Hapus
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Compact inline editor that replaces a row while an expense is being edited.
+function ExpenseEditForm({
+  editing,
+  categoryOptions,
+  saving,
+  onChange,
+  onSubmit,
+  onCancel
+}: {
+  editing: EditState;
+  categoryOptions: CategoryOption[];
+  saving: boolean;
+  onChange: (next: EditState) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form onSubmit={onSubmit} className="grid grid-cols-1 gap-3 py-3 sm:grid-cols-2">
+      <Field label="Tanggal">
+        <Input
+          type="date"
+          required
+          value={editing.expenseDate}
+          onChange={(event) => onChange({ ...editing, expenseDate: event.target.value })}
+        />
+      </Field>
+      <Field label="Kategori">
+        <Select
+          value={editing.category}
+          onChange={(event) =>
+            onChange({ ...editing, category: event.target.value as ExpenseCategory })
+          }
+        >
+          <CategoryOptions options={categoryOptions} />
+        </Select>
+      </Field>
+      <AmountField
+        label="Jumlah"
+        value={editing.amount}
+        onChange={(value) => onChange({ ...editing, amount: value })}
+      />
+      <Field label="Keterangan (opsional)">
+        <Input
+          type="text"
+          value={editing.description}
+          onChange={(event) => onChange({ ...editing, description: event.target.value })}
+        />
+      </Field>
+      <div className="flex gap-2 sm:col-span-2">
+        <Button type="submit" loading={saving} disabled={parseAmount(editing.amount) === null}>
+          Simpan
+        </Button>
+        <Button variant="secondary" onClick={onCancel} disabled={saving}>
+          Batal
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// "Total periode" strip: tiny uppercase caption, display-serif figure.
+function PeriodTotal({ value }: { value: number }) {
+  return (
+    <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-cream-200 bg-cream-100 px-3.5 py-2.5">
+      <span className="text-xs font-semibold tracking-wide text-ink-500 uppercase">
+        Total periode
+      </span>
+      <span className="font-display text-xl font-semibold tabular-nums text-pandan-800">
+        <AnimatedNumber value={value} format={formatIDR} />
+      </span>
+    </div>
+  );
+}
+
+export function ExpensesPage() {
+  const queryClient = useQueryClient();
 
   // Filters + pagination.
   const [month, setMonth] = useState(() => currentJakartaMonth());
@@ -141,16 +389,6 @@ export function ExpensesPage() {
 
   const invalidateList = () => queryClient.invalidateQueries({ queryKey: ["expenses", "list"] });
 
-  const createMutation = useMutation({
-    mutationFn: (body: CreateExpenseBody) =>
-      api<{ expense: Expense }>("/api/expenses", { method: "POST", body }),
-    onSuccess: async () => {
-      setAmount("");
-      setDescription("");
-      await invalidateList();
-    }
-  });
-
   const updateMutation = useMutation({
     mutationFn: (input: { expenseId: string; body: UpdateExpenseBody }) =>
       api<{ expense: Expense }>(`/api/expenses/${encodeURIComponent(input.expenseId)}`, {
@@ -170,23 +408,6 @@ export function ExpensesPage() {
       }),
     onSuccess: () => invalidateList()
   });
-
-  function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const amountValue = parseAmount(amount);
-
-    if (amountValue === null) {
-      return;
-    }
-
-    const trimmed = description.trim();
-    createMutation.mutate({
-      expenseDate,
-      category,
-      amount: amountValue,
-      ...(trimmed === "" ? {} : { description: trimmed })
-    });
-  }
 
   function handleEditSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -229,312 +450,131 @@ export function ExpensesPage() {
     }
   }
 
-  const total = listQuery.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT));
-
   return (
-    <div className="space-y-4">
-      <Card>
-        <h2 className="text-sm font-semibold text-stone-900">Tambah Pengeluaran</h2>
-        <form onSubmit={handleCreate} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className="text-xs text-stone-500">Tanggal</span>
-            <input
-              type="date"
-              required
-              value={expenseDate}
-              onChange={(event) => setExpenseDate(event.target.value)}
-              className={`mt-1 ${INPUT_CLASS}`}
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs text-stone-500">Kategori</span>
-            <select
-              value={category}
-              onChange={(event) => setCategory(event.target.value as ExpenseCategory)}
-              className={`mt-1 ${INPUT_CLASS}`}
-            >
-              {categoryOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-xs text-stone-500">Jumlah (Rp)</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              required
-              placeholder="cth. 50000"
-              value={amount}
-              onChange={(event) => setAmount(onlyDigits(event.target.value))}
-              className={`mt-1 ${INPUT_CLASS}`}
-            />
-            <AmountHint amount={amount} />
-          </label>
-          <label className="block">
-            <span className="text-xs text-stone-500">Keterangan (opsional)</span>
-            <input
-              type="text"
-              placeholder="cth. Belanja ayam 5 kg"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              className={`mt-1 ${INPUT_CLASS}`}
-            />
-          </label>
-          <div className="sm:col-span-2">
-            <button
-              type="submit"
-              disabled={createMutation.isPending || parseAmount(amount) === null}
-              className={PRIMARY_BUTTON_CLASS}
-            >
-              {createMutation.isPending ? "Menyimpan..." : "Simpan"}
-            </button>
-          </div>
-          {createMutation.isError ? (
-            <div className="sm:col-span-2">
-              <ErrorNote
-                message={errorMessage(createMutation.error, "Gagal menyimpan pengeluaran.")}
-              />
-            </div>
-          ) : null}
-        </form>
-      </Card>
+    <div>
+      <Rise>
+        <PageHeader title="Pengeluaran" subtitle="Catat belanja dapur dan operasional" />
+      </Rise>
 
-      <Card>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="block">
-            <span className="text-xs text-stone-500">Bulan</span>
-            <input
-              type="month"
-              value={month}
-              onChange={(event) => {
-                setMonth(event.target.value);
-                setPage(1);
-              }}
-              className={`mt-1 ${INPUT_CLASS}`}
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs text-stone-500">Kategori</span>
-            <select
-              value={categoryFilter}
-              onChange={(event) => {
-                setCategoryFilter(event.target.value);
-                setPage(1);
-              }}
-              className={`mt-1 ${INPUT_CLASS}`}
-            >
-              <option value="">Semua kategori</option>
-              {categoryOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+      <div className="space-y-4">
+        <Rise>
+          <QuickAddCard categoryOptions={categoryOptions} onSaved={invalidateList} />
+        </Rise>
 
-        <div className="mt-3">
-          {listQuery.isPending ? <Spinner label="Memuat pengeluaran..." /> : null}
-          {listQuery.isError ? (
-            <ErrorNote message={errorMessage(listQuery.error, "Gagal memuat pengeluaran.")} />
-          ) : null}
-
-          {updateMutation.isError ? (
-            <div className="mb-2">
-              <ErrorNote
-                message={errorMessage(updateMutation.error, "Gagal mengubah pengeluaran.")}
-              />
-            </div>
-          ) : null}
-          {deleteMutation.isError ? (
-            <div className="mb-2">
-              <ErrorNote
-                message={errorMessage(deleteMutation.error, "Gagal menghapus pengeluaran.")}
-              />
-            </div>
-          ) : null}
-
-          {listQuery.data ? (
-            <>
-              <p className="text-sm font-medium text-stone-900">
-                Total periode: {formatIDR(listQuery.data.periodTotal)}
-              </p>
-
-              {listQuery.data.items.length === 0 ? (
-                <EmptyNote message="Belum ada pengeluaran pada periode ini." />
-              ) : (
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-stone-200 text-left text-xs text-stone-500">
-                        <th className="py-2 pr-2 font-medium">Tanggal</th>
-                        <th className="py-2 pr-2 font-medium">Kategori</th>
-                        <th className="py-2 pr-2 font-medium">Keterangan</th>
-                        <th className="py-2 pr-2 text-right font-medium">Jumlah</th>
-                        <th className="py-2 text-right font-medium">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {listQuery.data.items.map((expense) =>
-                        editing && editing.expenseId === expense.expenseId ? (
-                          <tr key={expense.expenseId} className="border-b border-stone-100">
-                            <td colSpan={5} className="py-3">
-                              <form
-                                onSubmit={handleEditSave}
-                                className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-                              >
-                                <label className="block">
-                                  <span className="text-xs text-stone-500">Tanggal</span>
-                                  <input
-                                    type="date"
-                                    required
-                                    value={editing.expenseDate}
-                                    onChange={(event) =>
-                                      setEditing({ ...editing, expenseDate: event.target.value })
-                                    }
-                                    className={`mt-1 ${INPUT_CLASS}`}
-                                  />
-                                </label>
-                                <label className="block">
-                                  <span className="text-xs text-stone-500">Kategori</span>
-                                  <select
-                                    value={editing.category}
-                                    onChange={(event) =>
-                                      setEditing({
-                                        ...editing,
-                                        category: event.target.value as ExpenseCategory
-                                      })
-                                    }
-                                    className={`mt-1 ${INPUT_CLASS}`}
-                                  >
-                                    {categoryOptions.map((option) => (
-                                      <option key={option.value} value={option.value}>
-                                        {option.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <label className="block">
-                                  <span className="text-xs text-stone-500">Jumlah (Rp)</span>
-                                  <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    required
-                                    value={editing.amount}
-                                    onChange={(event) =>
-                                      setEditing({
-                                        ...editing,
-                                        amount: onlyDigits(event.target.value)
-                                      })
-                                    }
-                                    className={`mt-1 ${INPUT_CLASS}`}
-                                  />
-                                  <AmountHint amount={editing.amount} />
-                                </label>
-                                <label className="block">
-                                  <span className="text-xs text-stone-500">
-                                    Keterangan (opsional)
-                                  </span>
-                                  <input
-                                    type="text"
-                                    value={editing.description}
-                                    onChange={(event) =>
-                                      setEditing({ ...editing, description: event.target.value })
-                                    }
-                                    className={`mt-1 ${INPUT_CLASS}`}
-                                  />
-                                </label>
-                                <div className="flex gap-2 sm:col-span-2">
-                                  <button
-                                    type="submit"
-                                    disabled={
-                                      updateMutation.isPending ||
-                                      parseAmount(editing.amount) === null
-                                    }
-                                    className={PRIMARY_BUTTON_CLASS}
-                                  >
-                                    {updateMutation.isPending ? "Menyimpan..." : "Simpan"}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditing(null)}
-                                    disabled={updateMutation.isPending}
-                                    className={SECONDARY_BUTTON_CLASS}
-                                  >
-                                    Batal
-                                  </button>
-                                </div>
-                              </form>
-                            </td>
-                          </tr>
-                        ) : (
-                          <tr key={expense.expenseId} className="border-b border-stone-100">
-                            <td className="py-2 pr-2 whitespace-nowrap">
-                              {formatDateJakarta(expense.expenseDate)}
-                            </td>
-                            <td className="py-2 pr-2 whitespace-nowrap">
-                              {expenseCategoryLabels[expense.category]}
-                            </td>
-                            <td className="py-2 pr-2 text-stone-600">
-                              {expense.description ?? "—"}
-                            </td>
-                            <td className="py-2 pr-2 text-right whitespace-nowrap">
-                              {formatIDR(expense.amount)}
-                            </td>
-                            <td className="py-2 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => startEdit(expense)}
-                                className="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(expense.expenseId)}
-                                disabled={deleteMutation.isPending}
-                                className="rounded px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                              >
-                                Hapus
-                              </button>
-                            </td>
-                          </tr>
-                        )
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <div className="mt-3 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
-                  disabled={page <= 1 || listQuery.isFetching}
-                  className={SECONDARY_BUTTON_CLASS}
+        <Rise>
+          <Card>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Bulan">
+                <Input
+                  type="month"
+                  value={month}
+                  onChange={(event) => {
+                    setMonth(event.target.value);
+                    setPage(1);
+                  }}
+                />
+              </Field>
+              <Field label="Kategori">
+                <Select
+                  value={categoryFilter}
+                  onChange={(event) => {
+                    setCategoryFilter(event.target.value);
+                    setPage(1);
+                  }}
                 >
-                  Sebelumnya
-                </button>
-                <span className="text-xs text-stone-500">
-                  Halaman {page} dari {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((current) => current + 1)}
-                  disabled={page >= totalPages || listQuery.isFetching}
-                  className={SECONDARY_BUTTON_CLASS}
-                >
-                  Berikutnya
-                </button>
+                  <option value="">Semua kategori</option>
+                  <CategoryOptions options={categoryOptions} />
+                </Select>
+              </Field>
+            </div>
+
+            {listQuery.isPending ? (
+              <div className="mt-4">
+                <SkeletonRows rows={5} />
               </div>
-            </>
-          ) : null}
-        </div>
-      </Card>
+            ) : null}
+            {listQuery.isError ? (
+              <div className="mt-4">
+                <ErrorNote message={errorMessage(listQuery.error, "Gagal memuat pengeluaran.")} />
+              </div>
+            ) : null}
+
+            {updateMutation.isError ? (
+              <div className="mt-4">
+                <ErrorNote
+                  message={errorMessage(updateMutation.error, "Gagal mengubah pengeluaran.")}
+                />
+              </div>
+            ) : null}
+            {deleteMutation.isError ? (
+              <div className="mt-4">
+                <ErrorNote
+                  message={errorMessage(deleteMutation.error, "Gagal menghapus pengeluaran.")}
+                />
+              </div>
+            ) : null}
+
+            {listQuery.data ? (
+              <>
+                <PeriodTotal value={listQuery.data.periodTotal} />
+
+                {listQuery.data.items.length === 0 ? (
+                  <EmptyState emoji="🧾" message="Belum ada pengeluaran bulan ini." />
+                ) : (
+                  <StaggerList className="mt-2 divide-y divide-cream-200">
+                    {listQuery.data.items.map((expense) => (
+                      <StaggerItem key={expense.expenseId}>
+                        <AnimatePresence mode="wait" initial={false}>
+                          {editing && editing.expenseId === expense.expenseId ? (
+                            <motion.div
+                              key="edit"
+                              initial={{ opacity: 0, y: -4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -4 }}
+                              transition={{ duration: 0.15 }}
+                            >
+                              <ExpenseEditForm
+                                editing={editing}
+                                categoryOptions={categoryOptions}
+                                saving={updateMutation.isPending}
+                                onChange={setEditing}
+                                onSubmit={handleEditSave}
+                                onCancel={() => setEditing(null)}
+                              />
+                            </motion.div>
+                          ) : (
+                            <motion.div
+                              key="view"
+                              initial={{ opacity: 0, y: 4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: 4 }}
+                              transition={{ duration: 0.15 }}
+                            >
+                              <ExpenseRow
+                                expense={expense}
+                                onEdit={() => startEdit(expense)}
+                                onDelete={() => handleDelete(expense.expenseId)}
+                                deleting={deleteMutation.isPending}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </StaggerItem>
+                    ))}
+                  </StaggerList>
+                )}
+
+                <Pagination
+                  page={page}
+                  limit={PAGE_LIMIT}
+                  total={listQuery.data.total}
+                  onPageChange={setPage}
+                />
+              </>
+            ) : null}
+          </Card>
+        </Rise>
+      </div>
     </div>
   );
 }
