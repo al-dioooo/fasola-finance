@@ -50,9 +50,18 @@ export async function createApp(
         scriptSrc: ["'self'"],
         // Recharts and the QR data-URL image need these two relaxations.
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:"]
+        imgSrc: ["'self'", "data:"],
+        // Helmet defaults this directive on, which makes the browser
+        // force-upgrade every subresource on the page to https — fatal on a
+        // plain-HTTP origin (dev, or this process itself; nginx terminates
+        // TLS in production, so upgrading here is never correct).
+        upgradeInsecureRequests: null
       }
-    }
+    },
+    // Same reasoning: an app-level HSTS header on a plain-HTTP origin (e.g.
+    // localhost/127.0.0.1 in dev) makes browsers force-upgrade every future
+    // request to https and then fail outright, since nothing here serves TLS.
+    hsts: false
   });
   await app.register(rateLimit, {
     max: 100,
