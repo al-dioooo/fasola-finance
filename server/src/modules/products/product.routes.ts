@@ -16,7 +16,8 @@ const createProductBodySchema = z.object({
   category: z.string().nullable().optional(),
   aliases: z.array(z.string()).optional(),
   variants: z.array(z.string()).optional(),
-  notes: z.string().nullable().optional()
+  notes: z.string().nullable().optional(),
+  description: z.string().nullable().optional()
 });
 
 const updateProductBodySchema = z.object({
@@ -26,7 +27,8 @@ const updateProductBodySchema = z.object({
   category: z.string().nullable().optional(),
   aliases: z.array(z.string()).optional(),
   variants: z.array(z.string()).optional(),
-  notes: z.string().nullable().optional()
+  notes: z.string().nullable().optional(),
+  description: z.string().nullable().optional()
 });
 
 const productParamsSchema = z.object({

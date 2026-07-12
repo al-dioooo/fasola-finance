@@ -17,6 +17,7 @@ import type { Db } from "./db/client.js";
 import { buildAuthGuard } from "./modules/auth/auth.guard.js";
 import { registerAuthRoutes } from "./modules/auth/auth.routes.js";
 import { registerBotOpsRoutes } from "./modules/bot-ops/bot-ops.routes.js";
+import { registerBusinessProfileRoutes } from "./modules/business-profile/business-profile.routes.js";
 import { registerExpenseRoutes } from "./modules/expenses/expense.routes.js";
 import { buildLoggerOptions } from "./modules/logs/logger.js";
 import { registerOrderRoutes } from "./modules/orders/order.routes.js";
@@ -95,6 +96,7 @@ export async function createApp(
     await registerOrderRoutes(authenticated, { db: dependencies.db, config });
     await registerReportRoutes(authenticated, { db: dependencies.db, config });
     await registerProductRoutes(authenticated, { db: dependencies.db, config });
+    await registerBusinessProfileRoutes(authenticated, { db: dependencies.db, config });
     await registerExpenseRoutes(authenticated, { db: dependencies.db, config });
     await registerBotOpsRoutes(authenticated, {
       db: dependencies.db,

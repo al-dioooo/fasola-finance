@@ -26,7 +26,10 @@ const PRODUCTS_QUERY_KEY = ["products"] as const;
 
 const STOCK_STATUSES: StockStatus[] = ["Available", "Limited", "Sold Out", "Hidden"];
 
-type ProductPatch = { stockStatus: StockStatus } | { price: number };
+type ProductPatch =
+  | { stockStatus: StockStatus }
+  | { price: number }
+  | { description: string | null };
 
 interface NewProductBody {
   productName: string;
@@ -36,6 +39,7 @@ interface NewProductBody {
   aliases: string[];
   variants: string[];
   notes: string | null;
+  description: string | null;
 }
 
 function splitList(value: string): string[] {
@@ -132,9 +136,54 @@ function PriceEditor({
   );
 }
 
+function DescriptionEditor({
+  product,
+  onSave,
+  onCancel,
+  saving
+}: {
+  product: Product;
+  onSave: (description: string | null) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [draft, setDraft] = useState(product.description ?? "");
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = draft.trim();
+    onSave(trimmed === "" ? null : trimmed);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-2">
+      <Field
+        label="Deskripsi"
+        hint="Dipakai bot untuk menjawab pertanyaan pelanggan tentang menu ini."
+      >
+        <Textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          rows={3}
+          autoFocus
+        />
+      </Field>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
+          Batal
+        </Button>
+        <Button type="submit" size="sm" loading={saving}>
+          Simpan
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function ProductCard({ product }: { product: Product }) {
   const queryClient = useQueryClient();
   const [editingPrice, setEditingPrice] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
 
   const update = useMutation({
     mutationFn: (patch: ProductPatch) =>
@@ -201,6 +250,50 @@ function ProductCard({ product }: { product: Product }) {
         <p className="text-xs text-ink-500">Varian: {product.variants.join(", ")}</p>
       ) : null}
 
+      <AnimatePresence mode="wait" initial={false}>
+        {editingDescription ? (
+          <motion.div
+            key="description-edit"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+          >
+            <DescriptionEditor
+              product={product}
+              saving={update.isPending}
+              onCancel={() => setEditingDescription(false)}
+              onSave={(description) =>
+                update.mutate({ description }, { onSuccess: () => setEditingDescription(false) })
+              }
+            />
+          </motion.div>
+        ) : (
+          <motion.button
+            key="description-view"
+            type="button"
+            onClick={() => setEditingDescription(true)}
+            title="Ketuk untuk ubah deskripsi"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+            className="rounded-lg text-left hover:bg-cream-100"
+          >
+            <span className="block text-xs font-semibold tracking-wide text-ink-700 uppercase">
+              Deskripsi
+            </span>
+            {product.description ? (
+              <span className="mt-0.5 block text-xs text-ink-500">{product.description}</span>
+            ) : (
+              <span className="mt-0.5 block text-xs text-ink-300 italic">
+                Belum ada deskripsi — ketuk untuk menambah.
+              </span>
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
+
       <div className="mt-auto">
         <Field
           label="Status Stok"
@@ -234,6 +327,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const [aliases, setAliases] = useState("");
   const [variants, setVariants] = useState("");
   const [notes, setNotes] = useState("");
+  const [description, setDescription] = useState("");
 
   const create = useMutation({
     mutationFn: (body: NewProductBody) => api<unknown>("/api/products", { method: "POST", body }),
@@ -258,7 +352,8 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       stockStatus,
       aliases: splitList(aliases),
       variants: splitList(variants),
-      notes: notes.trim() === "" ? null : notes.trim()
+      notes: notes.trim() === "" ? null : notes.trim(),
+      description: description.trim() === "" ? null : description.trim()
     });
   };
 
@@ -328,6 +423,17 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
           value={variants}
           onChange={(event) => setVariants(event.target.value)}
           placeholder="Pisahkan dengan koma, mis. ayam, sapi"
+        />
+      </Field>
+
+      <Field
+        label="Deskripsi"
+        hint="Dipakai bot untuk menjawab pertanyaan pelanggan tentang menu ini."
+      >
+        <Textarea
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          rows={3}
         />
       </Field>
 

@@ -11,6 +11,7 @@ import { MenuPage } from "./pages/MenuPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 function useAuth() {
   return useQuery({
@@ -57,6 +58,7 @@ export function App() {
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/bot" element={<BotOpsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS products (
   variants_json TEXT NOT NULL DEFAULT '[]',
   notes TEXT,
   updated_at TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
+  description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -93,3 +94,21 @@ CREATE TABLE IF NOT EXISTS pending_menu_changes (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_menu_changes_one_pending_per_admin
   ON pending_menu_changes (admin_wa)
   WHERE status = 'pending';
+
+-- Bot migration 004: restaurant facts the bot answers from. Empty
+-- profile_value means "not provided" and the bot deflects to admin.
+CREATE TABLE IF NOT EXISTS business_profile (
+  profile_key TEXT PRIMARY KEY,
+  profile_value TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+);
+
+INSERT INTO business_profile (profile_key, profile_value) VALUES
+  ('opening_hours', ''),
+  ('store_address', ''),
+  ('delivery_area', ''),
+  ('delivery_eta', ''),
+  ('contact_info', ''),
+  ('promos', ''),
+  ('about', '')
+  ON CONFLICT (profile_key) DO NOTHING;

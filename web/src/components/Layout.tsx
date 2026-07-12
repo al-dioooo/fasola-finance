@@ -5,13 +5,15 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { api } from "../api/client";
 import { PageTransition } from "./motion/primitives";
 
+// shortLabel keeps the 7-item phone bottom bar from overflowing at 375px.
 const NAV_ITEMS = [
   { to: "/", label: "Beranda", end: true },
   { to: "/orders", label: "Pesanan", end: false },
   { to: "/menu", label: "Menu", end: false },
   { to: "/expenses", label: "Pengeluaran", end: false },
   { to: "/reports", label: "Laporan", end: false },
-  { to: "/bot", label: "Bot", end: false }
+  { to: "/bot", label: "Bot", end: false },
+  { to: "/settings", label: "Info Usaha", shortLabel: "Info", end: false }
 ];
 
 export function Layout() {
@@ -87,11 +89,11 @@ export function Layout() {
             <NavLink key={item.to} to={item.to} end={item.end} className="relative">
               {({ isActive }) => (
                 <span
-                  className={`flex flex-col items-center gap-0.5 px-2 py-1 text-[11px] font-semibold transition-colors ${
+                  className={`flex flex-col items-center gap-0.5 px-2 py-1 text-[11px] font-semibold whitespace-nowrap transition-colors ${
                     isActive ? "text-pandan-800" : "text-ink-400"
                   }`}
                 >
-                  {item.label}
+                  {"shortLabel" in item ? item.shortLabel : item.label}
                   {isActive ? (
                     <motion.span
                       layoutId="mobile-nav-dot"
