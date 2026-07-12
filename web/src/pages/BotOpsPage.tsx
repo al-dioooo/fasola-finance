@@ -12,6 +12,7 @@ import type {
   BotStatusResponse,
   HandoffItem,
   HandoffResponse,
+  MessageDirection,
   MessageLogItem,
   MessagesResponse
 } from "../api/types";
@@ -78,6 +79,18 @@ const PROCESSING_STATUS_OPTIONS = [
   "Unsupported"
 ];
 
+const directionLabels: Record<MessageDirection, string> = {
+  inbound: "Pelanggan",
+  outbound: "Bot"
+};
+
+// Mirrors the server's direction query param; "inbound" is the server default.
+const DIRECTION_OPTIONS = [
+  { value: "inbound", label: "Pelanggan" },
+  { value: "outbound", label: "Bot" },
+  { value: "all", label: "Semua" }
+] as const;
+
 interface BadgeTone {
   badge: string;
   dot: string;
@@ -118,6 +131,14 @@ function ProcessingStatusBadge({ status }: { status: string }) {
   const tone = status === "Success" ? TONE_OK : status === "Failed" ? TONE_DOWN : TONE_NEUTRAL;
 
   return <DotBadge tone={tone}>{processingStatusLabels[status] ?? status}</DotBadge>;
+}
+
+function DirectionBadge({ direction }: { direction: MessageDirection }) {
+  return (
+    <DotBadge tone={direction === "outbound" ? TONE_OK : TONE_NEUTRAL}>
+      {directionLabels[direction]}
+    </DotBadge>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -382,6 +403,9 @@ function StatusTab() {
 // Tab "Perlu Bantuan"
 // ---------------------------------------------------------------------------
 
+// Chat-style transcript: customer messages left, bot replies right, so the
+// admin can skim the conversation before taking over. The API returns
+// newest-first; a chat reads oldest-first, so render reversed.
 function RecentMessages({ messages }: { messages: MessageLogItem[] }) {
   if (messages.length === 0) {
     return <p className="mt-2 text-sm text-ink-500">Belum ada pesan tercatat.</p>;
@@ -389,15 +413,28 @@ function RecentMessages({ messages }: { messages: MessageLogItem[] }) {
 
   return (
     <ul className="mt-2 space-y-2">
-      {messages.map((message) => (
-        <li key={message.messageId} className="rounded-xl bg-cream-100 p-3 text-sm">
-          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-500">
-            <span>{formatDateTimeJakarta(message.receivedAt)}</span>
-            <ProcessingStatusBadge status={message.processingStatus} />
-          </div>
-          <p className="whitespace-pre-wrap text-ink-700">{message.messageText ?? "(tanpa teks)"}</p>
-        </li>
-      ))}
+      {[...messages].reverse().map((message) => {
+        const outbound = message.direction === "outbound";
+
+        return (
+          <li key={message.messageId} className={outbound ? "flex justify-end" : "flex"}>
+            <div
+              className={`max-w-[85%] rounded-xl p-3 text-sm ${
+                outbound ? "bg-pandan-50" : "bg-cream-100"
+              }`}
+            >
+              <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+                <DirectionBadge direction={message.direction} />
+                <span>{formatDateTimeJakarta(message.receivedAt)}</span>
+                {!outbound ? <ProcessingStatusBadge status={message.processingStatus} /> : null}
+              </div>
+              <p className="whitespace-pre-wrap text-ink-700">
+                {message.messageText ?? "(tanpa teks)"}
+              </p>
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -488,6 +525,7 @@ function HandoffTab() {
 interface MessageFilters {
   customerWa: string;
   processingStatus: string;
+  direction: string;
   from: string;
   to: string;
 }
@@ -495,6 +533,7 @@ interface MessageFilters {
 const emptyMessageFilters: MessageFilters = {
   customerWa: "",
   processingStatus: "",
+  direction: "inbound",
   from: "",
   to: ""
 };
@@ -519,6 +558,18 @@ function MessageFilterForm({
           value={draft.customerWa}
           onChange={(event) => onDraftChange({ ...draft, customerWa: event.target.value })}
         />
+      </Field>
+      <Field label="Pengirim">
+        <Select
+          value={draft.direction}
+          onChange={(event) => onDraftChange({ ...draft, direction: event.target.value })}
+        >
+          {DIRECTION_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
       </Field>
       <Field label="Status">
         <Select
@@ -567,6 +618,7 @@ function MessagesTable({ items }: { items: MessageLogItem[] }) {
           <tr>
             <th className={thLeft}>Waktu</th>
             <th className={thLeft}>Customer</th>
+            <th className={thLeft}>Pengirim</th>
             <th className={thLeft}>Tipe</th>
             <th className={thLeft}>Pesan</th>
             <th className={thLeft}>Intent</th>
@@ -581,6 +633,9 @@ function MessagesTable({ items }: { items: MessageLogItem[] }) {
                 {formatDateTimeJakarta(message.receivedAt)}
               </td>
               <td className={tdClass}>{message.customerWa}</td>
+              <td className={tdClass}>
+                <DirectionBadge direction={message.direction} />
+              </td>
               <td className={tdClass}>{message.messageType}</td>
               <td className={tdClass} title={message.messageText ?? undefined}>
                 {truncateText(message.messageText)}
@@ -612,6 +667,7 @@ function MessagesTab() {
         `/api/messages${buildQuery({
           customerWa: applied.customerWa,
           processingStatus: applied.processingStatus,
+          direction: applied.direction,
           from: applied.from,
           to: applied.to,
           page,

@@ -60,11 +60,14 @@ const HANDOFF_RECENT_MESSAGE_COUNT = 10;
 
 const businessDateSchema = z.string().refine(isBusinessDate, "Expected a YYYY-MM-DD business date");
 
+// Bot replies live in the same table (direction='outbound'); the log defaults
+// to customer messages only so totals stay customer counts.
 const messagesQuerySchema = paginationSchema.extend({
   customerWa: z.string().min(1).optional(),
   from: businessDateSchema.optional(),
   to: businessDateSchema.optional(),
-  processingStatus: z.string().min(1).optional()
+  processingStatus: z.string().min(1).optional(),
+  direction: z.enum(["inbound", "outbound", "all"]).default("inbound")
 });
 
 const aiLogsQuerySchema = paginationSchema.extend({
@@ -183,6 +186,7 @@ export function registerBotOpsRoutes(
       ...(range.fromUtc !== undefined ? { fromUtc: range.fromUtc } : {}),
       ...(range.toUtc !== undefined ? { toUtc: range.toUtc } : {}),
       ...(query.processingStatus !== undefined ? { processingStatus: query.processingStatus } : {}),
+      ...(query.direction !== "all" ? { direction: query.direction } : {}),
       limit: query.limit,
       offset: paginationOffset(query)
     });

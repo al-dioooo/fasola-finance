@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS products (
   notes TEXT,
   updated_at TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
-  description TEXT
+  description TEXT,
+  stock_quantity INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS messages (
   processing_status TEXT NOT NULL,
   error_message TEXT,
   created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
-  updated_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+  updated_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
+  direction TEXT NOT NULL DEFAULT 'inbound'
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_customer_wa_received_at
