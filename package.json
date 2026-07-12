@@ -29,8 +29,11 @@
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^11.0.0",
     "@fastify/static": "^9.0.0",
+    "@fontsource-variable/fraunces": "^5.2.9",
+    "@fontsource-variable/plus-jakarta-sans": "^5.2.8",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
+    "motion": "^12.42.2",
     "nanoid": "^5.1.11",
     "pg": "^8.22.0",
     "zod": "^4.4.3"

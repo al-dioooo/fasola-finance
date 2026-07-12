@@ -3,35 +3,127 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 
 import { api, buildQuery } from "../api/client";
-import type { OrdersListResponse, OrderStatus } from "../api/types";
-import { Badge, Card, EmptyNote, ErrorNote, Spinner } from "../components/ui";
-import { formatDateTimeJakarta, formatIDR, todayJakarta } from "../lib/format";
+import type { OrderListItem, OrdersListResponse, OrderStatus } from "../api/types";
+import { Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
 import {
-  orderStatusBadgeClasses,
-  orderStatusLabels,
-  paymentStatusBadgeClasses,
-  paymentStatusLabels
-} from "../lib/labels";
+  Card,
+  EmptyState,
+  ErrorNote,
+  Field,
+  FilterChips,
+  Input,
+  OrderStatusBadge,
+  PageHeader,
+  Pagination,
+  PaymentStatusBadge,
+  SkeletonRows,
+  type TabItem
+} from "../components/ui";
+import { formatDateTimeJakarta, formatIDR, todayJakarta } from "../lib/format";
+import { orderStatusLabels } from "../lib/labels";
 
 const PAGE_LIMIT = 25;
 
 const ORDER_STATUSES = Object.keys(orderStatusLabels) as OrderStatus[];
 
+type StatusFilterId = "all" | OrderStatus;
+
+const STATUS_FILTER_ITEMS: readonly TabItem<StatusFilterId>[] = [
+  { id: "all", label: "Semua" },
+  ...ORDER_STATUSES.map((value) => ({ id: value, label: orderStatusLabels[value] }))
+];
+
 function isOrderStatus(value: string | null): value is OrderStatus {
   return value !== null && value in orderStatusLabels;
 }
 
-function chipClass(selected: boolean): string {
-  return `rounded-full border px-3 py-1 text-xs font-medium whitespace-nowrap ${
-    selected
-      ? "border-emerald-800 bg-emerald-800 text-white"
-      : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
-  }`;
+function OrdersFilterCard({
+  allDates,
+  fromDate,
+  toDate,
+  searchInput,
+  onFromDateChange,
+  onToDateChange,
+  onAllDatesChange,
+  onSearchInputChange
+}: {
+  allDates: boolean;
+  fromDate: string;
+  toDate: string;
+  searchInput: string;
+  onFromDateChange: (value: string) => void;
+  onToDateChange: (value: string) => void;
+  onAllDatesChange: (checked: boolean) => void;
+  onSearchInputChange: (value: string) => void;
+}) {
+  return (
+    <Card>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Dari Tanggal">
+          <Input
+            type="date"
+            value={fromDate}
+            disabled={allDates}
+            onChange={(event) => onFromDateChange(event.target.value)}
+          />
+        </Field>
+        <Field label="Sampai Tanggal">
+          <Input
+            type="date"
+            value={toDate}
+            disabled={allDates}
+            onChange={(event) => onToDateChange(event.target.value)}
+          />
+        </Field>
+      </div>
+      <label className="mt-2 flex min-h-10 items-center gap-2 text-sm font-medium text-ink-700">
+        <input
+          type="checkbox"
+          checked={allDates}
+          onChange={(event) => onAllDatesChange(event.target.checked)}
+          className="size-4 rounded border-cream-300 accent-pandan-600"
+        />
+        Semua Tanggal
+      </label>
+      <div className="mt-2">
+        <Field label="Cari">
+          <Input
+            type="search"
+            value={searchInput}
+            onChange={(event) => onSearchInputChange(event.target.value)}
+            placeholder="Cari nama, nomor WA, atau produk..."
+          />
+        </Field>
+      </div>
+    </Card>
+  );
 }
 
-const pagerButtonClass =
-  "rounded border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 " +
-  "hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40";
+function OrderCard({ order }: { order: OrderListItem }) {
+  return (
+    <Link to={`/orders/${encodeURIComponent(order.orderId)}`} className="block">
+      <Card className="transition-colors hover:border-pandan-300">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-xs font-semibold text-ink-500">{order.orderId}</p>
+            <p className="mt-0.5 text-xs text-ink-400">{formatDateTimeJakarta(order.createdAt)}</p>
+            <p className="mt-1.5 text-sm font-medium text-ink-900">
+              {order.customerName ?? order.customerWa}
+            </p>
+            <p className="truncate text-xs text-ink-500">{order.productsText}</p>
+          </div>
+          <p className="font-display text-lg font-semibold whitespace-nowrap text-pandan-900 tabular-nums">
+            {formatIDR(order.estimatedSubtotal)}
+          </p>
+        </div>
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <OrderStatusBadge status={order.orderStatus} />
+          <PaymentStatusBadge status={order.paymentStatus} />
+        </div>
+      </Card>
+    </Link>
+  );
+}
 
 export function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -87,143 +179,74 @@ export function OrdersPage() {
     setPage(1);
   }
 
-  const total = orders.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / (orders.data?.limit ?? PAGE_LIMIT)));
+  function handlePageChange(next: number) {
+    if (orders.isFetching) {
+      return;
+    }
+    setPage(next);
+  }
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-stone-900">Pesanan</h2>
+      <Rise>
+        <PageHeader title="Pesanan" />
+      </Rise>
 
-      <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          className={chipClass(status === null)}
-          onClick={() => selectStatus(null)}
-        >
-          Semua
-        </button>
-        {ORDER_STATUSES.map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={chipClass(status === value)}
-            onClick={() => selectStatus(value)}
-          >
-            {orderStatusLabels[value]}
-          </button>
-        ))}
-      </div>
+      <Rise>
+        <FilterChips
+          items={STATUS_FILTER_ITEMS}
+          activeId={status ?? "all"}
+          onChange={(id) => selectStatus(id === "all" ? null : id)}
+        />
+      </Rise>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="date"
-          value={fromDate}
-          disabled={allDates}
-          onChange={(event) => {
-            setFromDate(event.target.value);
+      <Rise>
+        <OrdersFilterCard
+          allDates={allDates}
+          fromDate={fromDate}
+          toDate={toDate}
+          searchInput={searchInput}
+          onFromDateChange={(value) => {
+            setFromDate(value);
             setPage(1);
           }}
-          aria-label="Dari tanggal"
-          className="rounded border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-700 disabled:bg-stone-100 disabled:text-stone-400"
-        />
-        <span className="text-xs text-stone-500">s.d.</span>
-        <input
-          type="date"
-          value={toDate}
-          disabled={allDates}
-          onChange={(event) => {
-            setToDate(event.target.value);
+          onToDateChange={(value) => {
+            setToDate(value);
             setPage(1);
           }}
-          aria-label="Sampai tanggal"
-          className="rounded border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-700 disabled:bg-stone-100 disabled:text-stone-400"
+          onAllDatesChange={toggleAllDates}
+          onSearchInputChange={setSearchInput}
         />
-        <label className="flex items-center gap-1.5 text-sm text-stone-700">
-          <input
-            type="checkbox"
-            checked={allDates}
-            onChange={(event) => toggleAllDates(event.target.checked)}
-            className="rounded border-stone-300"
-          />
-          Semua Tanggal
-        </label>
-      </div>
+      </Rise>
 
-      <input
-        type="search"
-        value={searchInput}
-        onChange={(event) => setSearchInput(event.target.value)}
-        placeholder="Cari nama, nomor WA, atau produk..."
-        aria-label="Cari pesanan"
-        className="w-full rounded border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 placeholder:text-stone-400"
-      />
+      <Rise>
+        {orders.isPending ? <SkeletonRows rows={5} /> : null}
+        {orders.isError ? <ErrorNote message="Gagal memuat daftar pesanan." /> : null}
 
-      {orders.isPending ? <Spinner label="Memuat pesanan..." /> : null}
-      {orders.isError ? <ErrorNote message="Gagal memuat daftar pesanan." /> : null}
+        {orders.data && orders.data.items.length === 0 ? (
+          <Card>
+            <EmptyState emoji="🍽️" message="Tidak ada pesanan yang cocok dengan filter." />
+          </Card>
+        ) : null}
 
-      {orders.data && orders.data.items.length === 0 ? (
-        <EmptyNote message="Tidak ada pesanan yang cocok dengan filter." />
-      ) : null}
-
-      {orders.data && orders.data.items.length > 0 ? (
-        <>
-          <ul className="space-y-2">
-            {orders.data.items.map((order) => (
-              <li key={order.orderId}>
-                <Link to={`/orders/${encodeURIComponent(order.orderId)}`} className="block">
-                  <Card className="transition-colors hover:border-emerald-300">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-stone-900">{order.orderId}</p>
-                        <p className="text-xs text-stone-500">
-                          {formatDateTimeJakarta(order.createdAt)}
-                        </p>
-                        <p className="mt-1 text-sm text-stone-800">
-                          {order.customerName ?? order.customerWa}
-                        </p>
-                        <p className="truncate text-xs text-stone-500">{order.productsText}</p>
-                      </div>
-                      <p className="text-sm font-semibold whitespace-nowrap text-stone-900">
-                        {formatIDR(order.estimatedSubtotal)}
-                      </p>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge className={orderStatusBadgeClasses[order.orderStatus]}>
-                        {orderStatusLabels[order.orderStatus]}
-                      </Badge>
-                      <Badge className={paymentStatusBadgeClasses[order.paymentStatus]}>
-                        {paymentStatusLabels[order.paymentStatus]}
-                      </Badge>
-                    </div>
-                  </Card>
-                </Link>
-              </li>
-            ))}
-          </ul>
-
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              className={pagerButtonClass}
-              disabled={page <= 1 || orders.isFetching}
-              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-            >
-              Sebelumnya
-            </button>
-            <span className="text-sm text-stone-600">
-              Halaman {orders.data.page} dari {totalPages}
-            </span>
-            <button
-              type="button"
-              className={pagerButtonClass}
-              disabled={page >= totalPages || orders.isFetching}
-              onClick={() => setPage((prev) => prev + 1)}
-            >
-              Berikutnya
-            </button>
-          </div>
-        </>
-      ) : null}
+        {orders.data && orders.data.items.length > 0 ? (
+          <>
+            <StaggerList className="space-y-2.5">
+              {orders.data.items.map((order) => (
+                <StaggerItem key={order.orderId}>
+                  <OrderCard order={order} />
+                </StaggerItem>
+              ))}
+            </StaggerList>
+            <Pagination
+              page={orders.data.page}
+              limit={orders.data.limit}
+              total={orders.data.total}
+              onPageChange={handlePageChange}
+            />
+          </>
+        ) : null}
+      </Rise>
     </div>
   );
 }

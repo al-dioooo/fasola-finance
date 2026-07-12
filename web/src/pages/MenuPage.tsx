@@ -1,11 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "motion/react";
 import { useState, type FormEvent } from "react";
 
 import { api, ApiError } from "../api/client";
 import type { Product, ProductsResponse, StockStatus } from "../api/types";
-import { Badge, Card, EmptyNote, ErrorNote, Spinner } from "../components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Field,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+  SkeletonCard,
+  StockStatusBadge,
+  Textarea
+} from "../components/ui";
+import { Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
 import { formatIDR } from "../lib/format";
-import { stockStatusBadgeClasses, stockStatusLabels } from "../lib/labels";
+import { stockStatusLabels } from "../lib/labels";
 
 const PRODUCTS_QUERY_KEY = ["products"] as const;
 
@@ -39,13 +54,87 @@ function isValidPriceInput(value: string): boolean {
   return Number.isInteger(parsed) && parsed >= 0;
 }
 
-const inputClass =
-  "w-full rounded border border-stone-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none";
+function PendingChangesBanner({ visible }: { visible: boolean }) {
+  return (
+    <AnimatePresence initial={false}>
+      {visible ? (
+        <motion.div
+          initial={{ opacity: 0, y: -10, height: 0 }}
+          animate={{ opacity: 1, y: 0, height: "auto" }}
+          exit={{ opacity: 0, y: -10, height: 0 }}
+          transition={{ type: "spring", stiffness: 320, damping: 30 }}
+          className="overflow-hidden"
+        >
+          <div className="mb-4 flex items-center gap-3 rounded-card border border-kunyit-200 bg-kunyit-50 px-4 py-3 shadow-card">
+            <span aria-hidden className="text-lg">
+              ⏳
+            </span>
+            <p className="text-sm font-medium text-kunyit-800">
+              Ada perubahan menu menunggu konfirmasi di WhatsApp.
+            </p>
+          </div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+function PriceEditor({
+  product,
+  onSave,
+  onCancel,
+  saving
+}: {
+  product: Product;
+  onSave: (price: number) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [priceDraft, setPriceDraft] = useState(
+    product.price === null ? "" : String(product.price)
+  );
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!isValidPriceInput(priceDraft)) {
+      return;
+    }
+
+    onSave(Number(priceDraft));
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-end gap-2">
+      <Field label="Harga Baru" className="flex-1">
+        <Input
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={priceDraft}
+          onChange={(event) => setPriceDraft(event.target.value)}
+          autoFocus
+        />
+      </Field>
+      <Button
+        type="submit"
+        size="sm"
+        loading={saving}
+        disabled={!isValidPriceInput(priceDraft)}
+        className="min-h-10"
+      >
+        Simpan
+      </Button>
+      <Button type="button" variant="secondary" size="sm" onClick={onCancel} className="min-h-10">
+        Batal
+      </Button>
+    </form>
+  );
+}
 
 function ProductCard({ product }: { product: Product }) {
   const queryClient = useQueryClient();
   const [editingPrice, setEditingPrice] = useState(false);
-  const [priceDraft, setPriceDraft] = useState("");
 
   const update = useMutation({
     mutationFn: (patch: ProductPatch) =>
@@ -58,96 +147,78 @@ function ProductCard({ product }: { product: Product }) {
     }
   });
 
-  const startPriceEdit = () => {
-    setPriceDraft(product.price === null ? "" : String(product.price));
-    setEditingPrice(true);
-  };
-
-  const handlePriceSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!isValidPriceInput(priceDraft)) {
-      return;
-    }
-
-    update.mutate({ price: Number(priceDraft) }, { onSuccess: () => setEditingPrice(false) });
-  };
-
   return (
-    <Card className="space-y-3">
+    <Card className="flex h-full flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="font-medium text-stone-900">{product.productName}</p>
-          <p className="text-xs text-stone-500">
+        <div className="min-w-0">
+          <h3 className="font-display text-base font-semibold text-ink-900">
+            {product.productName}
+          </h3>
+          <p className="mt-0.5 text-xs text-ink-400">
             {product.category ?? "Tanpa kategori"}
-            <span className="ml-2 font-mono text-stone-400">{product.productId}</span>
+            <span className="ml-2 font-mono text-[11px] text-ink-300">{product.productId}</span>
           </p>
         </div>
-        <Badge className={stockStatusBadgeClasses[product.stockStatus]}>
-          {stockStatusLabels[product.stockStatus]}
-        </Badge>
+        <StockStatusBadge status={product.stockStatus} />
       </div>
 
-      {editingPrice ? (
-        <form onSubmit={handlePriceSubmit} className="flex items-center gap-2">
-          <input
-            type="number"
-            min="0"
-            step="1"
-            inputMode="numeric"
-            value={priceDraft}
-            onChange={(event) => setPriceDraft(event.target.value)}
-            autoFocus
-            aria-label="Harga baru"
-            className="w-32 rounded border border-stone-300 px-2 py-1 text-sm focus:border-emerald-600 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={update.isPending || !isValidPriceInput(priceDraft)}
-            className="rounded bg-emerald-800 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+      <AnimatePresence mode="wait" initial={false}>
+        {editingPrice ? (
+          <motion.div
+            key="price-edit"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
           >
-            {update.isPending ? "Menyimpan..." : "Simpan"}
-          </button>
-          <button
+            <PriceEditor
+              product={product}
+              saving={update.isPending}
+              onCancel={() => setEditingPrice(false)}
+              onSave={(price) =>
+                update.mutate({ price }, { onSuccess: () => setEditingPrice(false) })
+              }
+            />
+          </motion.div>
+        ) : (
+          <motion.button
+            key="price-view"
             type="button"
-            onClick={() => setEditingPrice(false)}
-            className="rounded border border-stone-300 px-3 py-1 text-sm text-stone-600 hover:bg-stone-50"
+            onClick={() => setEditingPrice(true)}
+            title="Ketuk untuk ubah harga"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+            className="min-h-10 self-start rounded-lg font-display text-2xl font-semibold text-pandan-800 tabular-nums underline decoration-pandan-300 decoration-dotted underline-offset-4 hover:text-pandan-600"
           >
-            Batal
-          </button>
-        </form>
-      ) : (
-        <button
-          type="button"
-          onClick={startPriceEdit}
-          title="Ketuk untuk ubah harga"
-          className="text-base font-semibold text-emerald-900 underline decoration-dotted underline-offset-4 hover:text-emerald-700"
-        >
-          {formatIDR(product.price)}
-        </button>
-      )}
+            {formatIDR(product.price)}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {product.variants.length > 0 ? (
-        <p className="text-xs text-stone-500">Varian: {product.variants.join(", ")}</p>
+        <p className="text-xs text-ink-500">Varian: {product.variants.join(", ")}</p>
       ) : null}
 
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-stone-600">Status Stok</span>
-        <select
-          value={product.stockStatus}
-          onChange={(event) => update.mutate({ stockStatus: event.target.value as StockStatus })}
-          disabled={update.isPending}
-          className="w-full rounded border border-stone-300 px-2 py-1.5 text-sm focus:border-emerald-600 focus:outline-none disabled:opacity-50"
+      <div className="mt-auto">
+        <Field
+          label="Status Stok"
+          hint='Pilih "Disembunyikan" untuk menyembunyikan menu dari pelanggan.'
         >
-          {STOCK_STATUSES.map((status) => (
-            <option key={status} value={status}>
-              {stockStatusLabels[status]}
-            </option>
-          ))}
-        </select>
-        <span className="mt-1 block text-xs text-stone-400">
-          Pilih &quot;Disembunyikan&quot; untuk menyembunyikan menu dari pelanggan.
-        </span>
-      </label>
+          <Select
+            value={product.stockStatus}
+            onChange={(event) => update.mutate({ stockStatus: event.target.value as StockStatus })}
+            disabled={update.isPending}
+          >
+            {STOCK_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {stockStatusLabels[status]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
 
       {update.isError ? <ErrorNote message="Gagal menyimpan perubahan. Coba lagi." /> : null}
     </Card>
@@ -198,116 +269,105 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
     : null;
 
   return (
-    <div className="fixed inset-0 z-20 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center">
-      <form
-        onSubmit={handleSubmit}
-        className="my-8 w-full max-w-md space-y-3 rounded-lg border border-stone-200 bg-white p-4 shadow-lg sm:my-0"
-      >
-        <h2 className="text-lg font-semibold text-emerald-900">Tambah Menu</h2>
+    <form onSubmit={handleSubmit} className="space-y-3.5">
+      <Field label="Nama Menu *">
+        <Input
+          type="text"
+          value={productName}
+          onChange={(event) => setProductName(event.target.value)}
+          autoFocus
+          required
+        />
+      </Field>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Nama Menu *</span>
-          <input
-            type="text"
-            value={productName}
-            onChange={(event) => setProductName(event.target.value)}
-            autoFocus
-            required
-            className={inputClass}
-          />
-        </label>
+      <Field label="Harga (Rp) *">
+        <Input
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={price}
+          onChange={(event) => setPrice(event.target.value)}
+          required
+        />
+      </Field>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Harga (Rp) *</span>
-          <input
-            type="number"
-            min="0"
-            step="1"
-            inputMode="numeric"
-            value={price}
-            onChange={(event) => setPrice(event.target.value)}
-            required
-            className={inputClass}
-          />
-        </label>
+      <Field label="Kategori">
+        <Input
+          type="text"
+          value={category}
+          onChange={(event) => setCategory(event.target.value)}
+        />
+      </Field>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Kategori</span>
-          <input
-            type="text"
-            value={category}
-            onChange={(event) => setCategory(event.target.value)}
-            className={inputClass}
-          />
-        </label>
+      <Field label="Status Stok">
+        <Select
+          value={stockStatus}
+          onChange={(event) => setStockStatus(event.target.value as StockStatus)}
+        >
+          {STOCK_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {stockStatusLabels[status]}
+            </option>
+          ))}
+        </Select>
+      </Field>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Status Stok</span>
-          <select
-            value={stockStatus}
-            onChange={(event) => setStockStatus(event.target.value as StockStatus)}
-            className={inputClass}
-          >
-            {STOCK_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {stockStatusLabels[status]}
-              </option>
-            ))}
-          </select>
-        </label>
+      <Field label="Alias">
+        <Input
+          type="text"
+          value={aliases}
+          onChange={(event) => setAliases(event.target.value)}
+          placeholder="Pisahkan dengan koma, mis. risol, risoles"
+        />
+      </Field>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Alias</span>
-          <input
-            type="text"
-            value={aliases}
-            onChange={(event) => setAliases(event.target.value)}
-            placeholder="Pisahkan dengan koma, mis. risol, risoles"
-            className={inputClass}
-          />
-        </label>
+      <Field label="Varian">
+        <Input
+          type="text"
+          value={variants}
+          onChange={(event) => setVariants(event.target.value)}
+          placeholder="Pisahkan dengan koma, mis. ayam, sapi"
+        />
+      </Field>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Varian</span>
-          <input
-            type="text"
-            value={variants}
-            onChange={(event) => setVariants(event.target.value)}
-            placeholder="Pisahkan dengan koma, mis. ayam, sapi"
-            className={inputClass}
-          />
-        </label>
+      <Field label="Catatan">
+        <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
+      </Field>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Catatan</span>
-          <textarea
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            rows={2}
-            className={inputClass}
-          />
-        </label>
+      {errorMessage ? <ErrorNote message={errorMessage} /> : null}
 
-        {errorMessage ? <ErrorNote message={errorMessage} /> : null}
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="secondary" onClick={onClose}>
+          Batal
+        </Button>
+        <Button type="submit" loading={create.isPending} disabled={!canSubmit}>
+          Simpan
+        </Button>
+      </div>
+    </form>
+  );
+}
 
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded border border-stone-300 px-4 py-2 text-sm text-stone-600 hover:bg-stone-50"
-          >
-            Batal
-          </button>
-          <button
-            type="submit"
-            disabled={create.isPending || !canSubmit}
-            className="rounded bg-emerald-800 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {create.isPending ? "Menyimpan..." : "Simpan"}
-          </button>
-        </div>
-      </form>
+function MenuGridSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 3 }, (_, index) => (
+        <SkeletonCard key={index} lines={4} />
+      ))}
     </div>
+  );
+}
+
+function ProductGrid({ products }: { products: Product[] }) {
+  return (
+    <StaggerList className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {products.map((product) => (
+        <StaggerItem key={product.productId}>
+          <ProductCard product={product} />
+        </StaggerItem>
+      ))}
+    </StaggerList>
   );
 }
 
@@ -320,42 +380,39 @@ export function MenuPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-emerald-900">Menu</h2>
-        <button
-          type="button"
-          onClick={() => setShowAddForm(true)}
-          className="rounded bg-emerald-800 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          Tambah Menu
-        </button>
-      </div>
+    <div>
+      <Rise>
+        <PageHeader
+          title="Menu"
+          actions={<Button onClick={() => setShowAddForm(true)}>Tambah Menu</Button>}
+        />
+      </Rise>
 
-      {products.data && products.data.pendingMenuChanges > 0 ? (
-        <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Ada perubahan menu menunggu konfirmasi di WhatsApp.
-        </div>
-      ) : null}
+      <PendingChangesBanner
+        visible={Boolean(products.data && products.data.pendingMenuChanges > 0)}
+      />
 
-      {products.isPending ? <Spinner label="Memuat menu..." /> : null}
-      {products.isError ? (
-        <ErrorNote message="Gagal memuat menu. Coba muat ulang halaman." />
-      ) : null}
+      <Rise>
+        {products.isPending ? <MenuGridSkeleton /> : null}
+        {products.isError ? (
+          <ErrorNote message="Gagal memuat menu. Coba muat ulang halaman." />
+        ) : null}
+        {products.data ? (
+          products.data.items.length === 0 ? (
+            <EmptyState emoji="🍳" message="Belum ada menu.">
+              <Button className="mt-1" onClick={() => setShowAddForm(true)}>
+                Tambah Menu
+              </Button>
+            </EmptyState>
+          ) : (
+            <ProductGrid products={products.data.items} />
+          )
+        ) : null}
+      </Rise>
 
-      {products.data ? (
-        products.data.items.length === 0 ? (
-          <EmptyNote message="Belum ada menu." />
-        ) : (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {products.data.items.map((product) => (
-              <ProductCard key={product.productId} product={product} />
-            ))}
-          </div>
-        )
-      ) : null}
-
-      {showAddForm ? <AddProductForm onClose={() => setShowAddForm(false)} /> : null}
+      <Modal open={showAddForm} onClose={() => setShowAddForm(false)} title="Tambah Menu">
+        <AddProductForm onClose={() => setShowAddForm(false)} />
+      </Modal>
     </div>
   );
 }

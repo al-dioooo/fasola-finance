@@ -1,9 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 
 import { api, ApiError } from "../api/client";
-import { ErrorNote } from "../components/ui";
+import { Rise } from "../components/motion/primitives";
+import { Button } from "../components/ui/Button";
+import { ErrorNote } from "../components/ui/Feedback";
+import { Field, Input } from "../components/ui/Field";
 
 export function LoginPage() {
   const [password, setPassword] = useState("");
@@ -39,36 +43,51 @@ export function LoginPage() {
         : null;
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
-      >
-        <div>
-          <h1 className="text-xl font-semibold text-emerald-900">Fasola Finance</h1>
-          <p className="text-sm text-stone-500">Dashboard admin Dapoer Mami Fasola</p>
-        </div>
-
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoFocus
-            className="w-full rounded border border-stone-300 px-3 py-2 focus:border-emerald-600 focus:outline-none"
-          />
-        </label>
-
-        {errorMessage ? <ErrorNote message={errorMessage} /> : null}
-
-        <button
-          type="submit"
-          disabled={login.isPending || !password}
-          className="w-full rounded bg-emerald-800 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+    <div className="pattern-batik flex min-h-dvh items-center justify-center bg-pandan-950 px-4">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm">
+        {/* A short, decisive shake when the password is wrong. */}
+        <motion.div
+          animate={login.isError ? { x: [0, -8, 8, -5, 5, 0] } : { x: 0 }}
+          transition={{ duration: 0.35 }}
+          className="space-y-5 rounded-card border border-pandan-800 bg-cream-50 p-6 shadow-lift sm:p-7"
         >
-          {login.isPending ? "Masuk..." : "Masuk"}
-        </button>
+          <Rise>
+            <p className="text-xs font-semibold tracking-[0.2em] text-pandan-600 uppercase">
+              Dapoer Mami Fasola
+            </p>
+            <h1 className="mt-1 font-display text-3xl font-semibold text-pandan-900">
+              Fasola Finance
+            </h1>
+            <p className="mt-1 text-sm text-ink-500">
+              Dashboard admin untuk pesanan, menu, dan keuangan.
+            </p>
+          </Rise>
+
+          <Rise delay={0.07}>
+            <Field label="Password">
+              <Input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoFocus
+                autoComplete="current-password"
+              />
+            </Field>
+          </Rise>
+
+          {errorMessage ? <ErrorNote message={errorMessage} /> : null}
+
+          <Rise delay={0.14}>
+            <Button
+              type="submit"
+              loading={login.isPending}
+              disabled={!password}
+              className="w-full"
+            >
+              Masuk
+            </Button>
+          </Rise>
+        </motion.div>
       </form>
     </div>
   );

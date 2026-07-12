@@ -1,9 +1,102 @@
 @import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/fraunces";
+
+/*
+ * Dapoer Mami Fasola — "dapoer hangat" design tokens.
+ * Warm Indonesian home-kitchen palette: pandan green (primary),
+ * beras cream (surfaces), kunyit turmeric (pending/warning),
+ * sambal terracotta (danger), warm ink for text.
+ */
+@theme {
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces Variable", "Iowan Old Style", Georgia, serif;
+
+  --color-cream-50: #fdfcf7;
+  --color-cream-100: #faf6ec;
+  --color-cream-200: #f2ebd9;
+  --color-cream-300: #e7dcc0;
+  --color-cream-400: #d6c69d;
+
+  --color-pandan-50: #f1f7f1;
+  --color-pandan-100: #dcecdd;
+  --color-pandan-200: #bcd9c0;
+  --color-pandan-300: #92bf9a;
+  --color-pandan-400: #63a071;
+  --color-pandan-500: #448553;
+  --color-pandan-600: #326941;
+  --color-pandan-700: #2a5437;
+  --color-pandan-800: #24452f;
+  --color-pandan-900: #1d3a28;
+  --color-pandan-950: #0e2116;
+
+  --color-kunyit-50: #fdf8ec;
+  --color-kunyit-100: #f9edc8;
+  --color-kunyit-200: #f3da8e;
+  --color-kunyit-300: #ecc355;
+  --color-kunyit-400: #e4a92e;
+  --color-kunyit-500: #d48f1f;
+  --color-kunyit-600: #b06d18;
+  --color-kunyit-700: #8c5117;
+  --color-kunyit-800: #733f1a;
+  --color-kunyit-900: #61351b;
+
+  --color-sambal-50: #fdf3f0;
+  --color-sambal-100: #fbe5de;
+  --color-sambal-200: #f8cec2;
+  --color-sambal-300: #f2ab97;
+  --color-sambal-400: #e97e62;
+  --color-sambal-500: #dd5a39;
+  --color-sambal-600: #c9422a;
+  --color-sambal-700: #a83422;
+  --color-sambal-800: #8b2d21;
+  --color-sambal-900: #732a20;
+
+  --color-ink-900: #292019;
+  --color-ink-700: #453a30;
+  --color-ink-500: #6f6155;
+  --color-ink-400: #94867a;
+  --color-ink-300: #b6a99c;
+
+  --shadow-card: 0 1px 2px rgb(41 32 25 / 0.05), 0 4px 16px -4px rgb(41 32 25 / 0.08);
+  --shadow-lift: 0 2px 4px rgb(41 32 25 / 0.06), 0 12px 32px -8px rgb(41 32 25 / 0.16);
+
+  --radius-card: 1.25rem;
+}
 
 :root {
   color-scheme: light;
 }
 
 body {
-  @apply bg-stone-100 text-stone-900 antialiased;
+  @apply bg-cream-100 font-sans text-ink-900 antialiased;
+  font-optical-sizing: auto;
+}
+
+::selection {
+  @apply bg-kunyit-200 text-ink-900;
+}
+
+/* Warm focus ring, consistent everywhere. */
+:focus-visible {
+  outline: 2px solid var(--color-pandan-500);
+  outline-offset: 2px;
+}
+
+/* Batik-inspired dot lattice used on the header and login backdrop. */
+.pattern-batik {
+  background-image:
+    radial-gradient(rgb(250 246 236 / 0.13) 1px, transparent 1.5px),
+    radial-gradient(rgb(250 246 236 / 0.07) 1px, transparent 1.5px);
+  background-size:
+    22px 22px,
+    22px 22px;
+  background-position:
+    0 0,
+    11px 11px;
+}
+
+/* Fraunces breathes better with slightly tighter tracking at display sizes. */
+.font-display {
+  letter-spacing: -0.015em;
 }

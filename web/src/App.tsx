@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 
 import { api, ApiError } from "./api/client";
 import { Layout } from "./components/Layout";
-import { Spinner } from "./components/ui";
 import { BotOpsPage } from "./pages/BotOpsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
@@ -27,7 +26,13 @@ export function App() {
   const auth = useAuth();
 
   if (auth.isPending) {
-    return <Spinner label="Memuat..." />;
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-cream-100">
+        <p className="animate-pulse font-display text-xl font-semibold text-pandan-800">
+          Dapoer Mami Fasola
+        </p>
+      </div>
+    );
   }
 
   const authenticated =
