@@ -18,6 +18,8 @@ export interface HandoffOrderRecord {
   orderStatus: OrderStatus;
 }
 
+export type MessageDirection = "inbound" | "outbound";
+
 export interface MessageLogRecord {
   messageId: string;
   customerWa: string;
@@ -28,6 +30,7 @@ export interface MessageLogRecord {
   processingStatus: string;
   errorMessage: string | null;
   receivedAt: string;
+  direction: MessageDirection;
 }
 
 export interface AiLogRecord {
@@ -50,6 +53,7 @@ export interface MessageListFilters {
   fromUtc?: string;
   toUtc?: string;
   processingStatus?: string;
+  direction?: MessageDirection;
   limit: number;
   offset: number;
 }
@@ -86,6 +90,7 @@ type MessageRow = {
   processing_status: string;
   error_message: string | null;
   received_at: string;
+  direction: string;
 };
 
 type AiLogRow = {
@@ -109,7 +114,7 @@ const HANDOFF_ORDER_STATUS = "Need Admin Help";
 
 // Never select raw_payload_json — the log viewer must not leak raw payloads.
 const MESSAGE_COLUMNS = `message_id, customer_wa, chat_id, message_type, message_text,
-  detected_intent, processing_status, error_message, received_at`;
+  detected_intent, processing_status, error_message, received_at, direction`;
 
 const AI_LOG_COLUMNS = `log_id, created_at, message_id, customer_wa, prompt_version, model,
   intent, confidence, validation_status, error_type, handoff_triggered, latency_ms`;
@@ -188,6 +193,10 @@ export function createLogStore(db: Db) {
       if (filters.processingStatus !== undefined) {
         params.push(filters.processingStatus);
         conditions.push(`processing_status = $${params.length}`);
+      }
+      if (filters.direction !== undefined) {
+        params.push(filters.direction);
+        conditions.push(`direction = $${params.length}`);
       }
 
       const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -277,7 +286,8 @@ function mapMessageRow(row: MessageRow): MessageLogRecord {
     detectedIntent: row.detected_intent,
     processingStatus: row.processing_status,
     errorMessage: row.error_message,
-    receivedAt: row.received_at
+    receivedAt: row.received_at,
+    direction: row.direction as MessageDirection
   };
 }
 

@@ -193,6 +193,8 @@ export interface BotHealthResponse {
   db: "ok" | "down";
 }
 
+export type MessageDirection = "inbound" | "outbound";
+
 export interface MessageLogItem {
   messageId: string;
   customerWa: string;
@@ -203,6 +205,7 @@ export interface MessageLogItem {
   processingStatus: string;
   errorMessage: string | null;
   receivedAt: string;
+  direction: MessageDirection;
 }
 
 export interface MessagesResponse {

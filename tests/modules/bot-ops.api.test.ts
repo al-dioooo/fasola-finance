@@ -89,14 +89,15 @@ interface SeedMessageInput {
   customerWa: string;
   receivedAt: string;
   processingStatus: string;
+  direction?: "inbound" | "outbound";
 }
 
 async function insertMessage(db: Db, input: SeedMessageInput): Promise<void> {
   await db.query(
     `INSERT INTO messages (
        message_id, customer_wa, chat_id, message_type, message_text, raw_payload_json,
-       received_at, detected_intent, processing_status, error_message
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       received_at, detected_intent, processing_status, error_message, direction
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       input.messageId,
       input.customerWa,
@@ -107,7 +108,8 @@ async function insertMessage(db: Db, input: SeedMessageInput): Promise<void> {
       input.receivedAt,
       "order",
       input.processingStatus,
-      null
+      null,
+      input.direction ?? "inbound"
     ]
   );
 }
@@ -168,6 +170,15 @@ describe("bot ops API", () => {
       customerWa: "628222",
       receivedAt: "2026-07-04T17:00:00Z",
       processingStatus: "done"
+    });
+    // Bot reply (migration 005): excluded from customer message counts, but
+    // part of the handoff conversation view.
+    await insertMessage(testDb.db, {
+      messageId: "bot-222-reply",
+      customerWa: "628222",
+      receivedAt: "2026-07-04T17:00:30Z",
+      processingStatus: "Success",
+      direction: "outbound"
     });
 
     app = await buildTestApp({ db: testDb.db, fetchImpl: fetchMock });
@@ -409,11 +420,15 @@ describe("bot ops API", () => {
 
     const second = body.items[1];
     expect(second?.order.orderId).toBe("ord-help-2");
-    expect(second?.recentMessages).toHaveLength(2);
-    expect(second?.recentMessages[0]?.messageId).toBe("msg-222-b");
+    // Bot replies stay in the handoff transcript so the admin sees both sides.
+    expect(second?.recentMessages).toHaveLength(3);
+    expect(second?.recentMessages[0]?.messageId).toBe("bot-222-reply");
+    expect(second?.recentMessages[0]?.direction).toBe("outbound");
+    expect(second?.recentMessages[1]?.messageId).toBe("msg-222-b");
+    expect(second?.recentMessages[1]?.direction).toBe("inbound");
   });
 
-  it("lists messages newest-first with default pagination", async () => {
+  it("lists messages newest-first with default pagination, excluding bot replies", async () => {
     const response = await app.inject({
       method: "GET",
       url: "/api/messages",
@@ -430,6 +445,35 @@ describe("bot ops API", () => {
     expect(body.items[1]?.messageId).toBe("msg-222-a");
     expect(body.items[2]?.messageId).toBe("msg-111-11");
     expect(body.items[0]).not.toHaveProperty("rawPayloadJson");
+    expect(body.items.every((item) => item.direction === "inbound")).toBe(true);
+  });
+
+  it("filters messages by direction", async () => {
+    const outbound = await app.inject({
+      method: "GET",
+      url: "/api/messages?direction=outbound",
+      headers: { cookie }
+    });
+    const outboundBody = parseBody<MessagesResponse>(outbound);
+    expect(outboundBody.total).toBe(1);
+    expect(outboundBody.items[0]?.messageId).toBe("bot-222-reply");
+    expect(outboundBody.items[0]?.direction).toBe("outbound");
+
+    const all = await app.inject({
+      method: "GET",
+      url: "/api/messages?direction=all",
+      headers: { cookie }
+    });
+    const allBody = parseBody<MessagesResponse>(all);
+    expect(allBody.total).toBe(15);
+    expect(allBody.items[0]?.messageId).toBe("bot-222-reply");
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: "/api/messages?direction=sideways",
+      headers: { cookie }
+    });
+    expect(invalid.statusCode).toBe(400);
   });
 
   it("filters messages by customer, processing status, and Jakarta date", async () => {
