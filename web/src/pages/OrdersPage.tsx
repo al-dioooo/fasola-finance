@@ -3,10 +3,11 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 
 import { api, buildQuery } from "../api/client";
-import type { OrderListItem, OrdersListResponse, OrderStatus } from "../api/types";
+import type { OrderListItem, OrdersListResponse, OrderSource, OrderStatus } from "../api/types";
 import { Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
 import {
   Card,
+  ChannelBadge,
   EmptyState,
   ErrorNote,
   Field,
@@ -35,6 +36,18 @@ const STATUS_FILTER_ITEMS: readonly TabItem<StatusFilterId>[] = [
 
 function isOrderStatus(value: string | null): value is OrderStatus {
   return value !== null && value in orderStatusLabels;
+}
+
+type SourceFilterId = "all" | OrderSource;
+
+const SOURCE_FILTER_ITEMS: readonly TabItem<SourceFilterId>[] = [
+  { id: "all", label: "Semua Kanal" },
+  { id: "whatsapp", label: "WhatsApp" },
+  { id: "gofood", label: "GoFood" }
+];
+
+function isOrderSource(value: string | null): value is OrderSource {
+  return value === "whatsapp" || value === "gofood";
 }
 
 function OrdersFilterCard({
@@ -119,6 +132,7 @@ function OrderCard({ order }: { order: OrderListItem }) {
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           <OrderStatusBadge status={order.orderStatus} />
           <PaymentStatusBadge status={order.paymentStatus} />
+          {order.source === "gofood" ? <ChannelBadge source={order.source} /> : null}
         </div>
       </Card>
     </Link>
@@ -129,6 +143,8 @@ export function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const statusParam = searchParams.get("status");
   const status = isOrderStatus(statusParam) ? statusParam : null;
+  const sourceParam = searchParams.get("source");
+  const source = isOrderSource(sourceParam) ? sourceParam : null;
 
   const [allDates, setAllDates] = useState(false);
   const [fromDate, setFromDate] = useState(todayJakarta);
@@ -149,10 +165,10 @@ export function OrdersPage() {
   const to = allDates ? undefined : toDate;
 
   const orders = useQuery({
-    queryKey: ["orders", "list", { status, q, from: from ?? "", to: to ?? "", page }],
+    queryKey: ["orders", "list", { status, source, q, from: from ?? "", to: to ?? "", page }],
     queryFn: () =>
       api<OrdersListResponse>(
-        `/api/orders${buildQuery({ status, q, from, to, page, limit: PAGE_LIMIT })}`
+        `/api/orders${buildQuery({ status, source, q, from, to, page, limit: PAGE_LIMIT })}`
       ),
     placeholderData: keepPreviousData
   });
@@ -164,6 +180,19 @@ export function OrdersPage() {
         params.delete("status");
       } else {
         params.set("status", next);
+      }
+      return params;
+    });
+    setPage(1);
+  }
+
+  function selectSource(next: OrderSource | null) {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (next === null) {
+        params.delete("source");
+      } else {
+        params.set("source", next);
       }
       return params;
     });
@@ -197,6 +226,14 @@ export function OrdersPage() {
           items={STATUS_FILTER_ITEMS}
           activeId={status ?? "all"}
           onChange={(id) => selectStatus(id === "all" ? null : id)}
+        />
+      </Rise>
+
+      <Rise>
+        <FilterChips
+          items={SOURCE_FILTER_ITEMS}
+          activeId={source ?? "all"}
+          onChange={(id) => selectSource(id === "all" ? null : id)}
         />
       </Rise>
 

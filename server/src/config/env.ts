@@ -20,7 +20,16 @@ const envSchema = z.object({
   GOWA_BASIC_AUTH_USER: z.string().default(""),
   GOWA_BASIC_AUTH_PASSWORD: z.string().default(""),
 
-  BOT_BASE_URL: z.string().url().default("http://127.0.0.1:3010")
+  BOT_BASE_URL: z.string().url().default("http://127.0.0.1:3010"),
+  // Shared secret sent as a Bearer token to the bot's /internal/gofood/*
+  // endpoints. Must match the bot's INTERNAL_API_TOKEN.
+  BOT_INTERNAL_TOKEN: z.string().default(""),
+
+  // Product images for the GoFood catalog are uploaded here and served
+  // publicly at PUBLIC_BASE_URL/uploads/<file>. In production PUBLIC_BASE_URL
+  // must be the dashboard's public https origin so GoFood can fetch the images.
+  PUBLIC_BASE_URL: z.string().url().default("http://localhost:3100"),
+  UPLOADS_DIR: z.string().default("./data/uploads")
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

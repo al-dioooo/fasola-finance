@@ -30,6 +30,7 @@ const listQuerySchema = paginationSchema.extend({
       return Array.isArray(value) ? value : [value];
     }),
   paymentStatus: paymentStatusSchema.optional(),
+  source: z.enum(["whatsapp", "gofood"]).optional(),
   q: z.string().trim().min(1).optional(),
   from: businessDateSchema.optional(),
   to: businessDateSchema.optional()
@@ -75,11 +76,12 @@ export function registerOrderRoutes(
       return reply.status(400).send({ error: "Parameter pencarian tidak valid" });
     }
 
-    const { status, paymentStatus, q, from, to, page, limit } = parsed.data;
+    const { status, paymentStatus, source, q, from, to, page, limit } = parsed.data;
 
     const result = await store.listOrders({
       ...(status && status.length > 0 ? { statuses: status } : {}),
       ...(paymentStatus ? { paymentStatus } : {}),
+      ...(source ? { source } : {}),
       ...(q ? { q } : {}),
       // Business dates are Jakarta calendar days; created_at is compared as
       // UTC instants ([from 00:00, to+1 00:00) Jakarta).

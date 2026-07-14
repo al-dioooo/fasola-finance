@@ -4,6 +4,7 @@ import type { OrderStatus, PaymentStatus, StockStatus } from "../../api/types";
 import {
   orderStatusLabels,
   paymentStatusLabels,
+  sourceLabel,
   stockStatusLabels
 } from "../../lib/labels";
 
@@ -78,6 +79,22 @@ export function StockStatusBadge({ status }: { status: StockStatus }) {
     <Badge className={classes.badge}>
       <Dot className={classes.dot} />
       {stockStatusLabels[status]}
+    </Badge>
+  );
+}
+
+const SOURCE_CLASSES: Record<string, { badge: string; dot: string }> = {
+  whatsapp: { badge: "bg-pandan-100 text-pandan-800", dot: "bg-pandan-500" },
+  gofood: { badge: "bg-sambal-100 text-sambal-800", dot: "bg-sambal-500" }
+};
+
+// Order channel (WhatsApp / GoFood). Unknown sources render neutrally.
+export function ChannelBadge({ source }: { source: string }) {
+  const classes = SOURCE_CLASSES[source] ?? { badge: "bg-cream-200 text-ink-500", dot: "bg-ink-400" };
+  return (
+    <Badge className={classes.badge}>
+      <Dot className={classes.dot} />
+      {sourceLabel(source)}
     </Badge>
   );
 }

@@ -9,16 +9,19 @@ import fastify, {
 } from "fastify";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { AppConfig } from "./config/env.js";
 import type { Db } from "./db/client.js";
 import { buildAuthGuard } from "./modules/auth/auth.guard.js";
+import { isSafeUploadFilename } from "./modules/products/product-image.js";
 import { registerAuthRoutes } from "./modules/auth/auth.routes.js";
 import { registerBotOpsRoutes } from "./modules/bot-ops/bot-ops.routes.js";
 import { registerBusinessProfileRoutes } from "./modules/business-profile/business-profile.routes.js";
 import { registerExpenseRoutes } from "./modules/expenses/expense.routes.js";
+import { registerGofoodRoutes } from "./modules/gofood/gofood.routes.js";
 import { buildLoggerOptions } from "./modules/logs/logger.js";
 import { registerOrderRoutes } from "./modules/orders/order.routes.js";
 import { registerProductRoutes } from "./modules/products/product.routes.js";
@@ -87,6 +90,26 @@ export async function createApp(
     service: SERVICE_NAME
   }));
 
+  // Public product images (GoFood fetches these server-side; the SPA <img>
+  // loads them same-origin). Filenames are validated to a nanoid + .png, so no
+  // path traversal is possible.
+  const uploadsDir = resolve(config.UPLOADS_DIR);
+  app.get<{ Params: { filename: string } }>("/uploads/:filename", async (request, reply) => {
+    const { filename } = request.params;
+    if (!isSafeUploadFilename(filename)) {
+      return reply.status(400).send({ error: "Invalid filename" });
+    }
+    try {
+      const file = await readFile(join(uploadsDir, filename));
+      return reply
+        .header("content-type", "image/png")
+        .header("cache-control", "public, max-age=86400")
+        .send(file);
+    } catch {
+      return reply.status(404).send({ error: "Not Found" });
+    }
+  });
+
   await registerAuthRoutes(app, { config });
 
   // Every other /api route requires a valid session.
@@ -99,6 +122,11 @@ export async function createApp(
     await registerBusinessProfileRoutes(authenticated, { db: dependencies.db, config });
     await registerExpenseRoutes(authenticated, { db: dependencies.db, config });
     await registerBotOpsRoutes(authenticated, {
+      db: dependencies.db,
+      config,
+      ...(dependencies.fetchImpl ? { fetchImpl: dependencies.fetchImpl } : {})
+    });
+    await registerGofoodRoutes(authenticated, {
       db: dependencies.db,
       config,
       ...(dependencies.fetchImpl ? { fetchImpl: dependencies.fetchImpl } : {})

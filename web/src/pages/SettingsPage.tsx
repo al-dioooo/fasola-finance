@@ -14,10 +14,13 @@ import {
   Field,
   PageHeader,
   SkeletonCard,
-  Textarea
+  Tabs,
+  Textarea,
+  type TabItem
 } from "../components/ui";
 import { Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
 import { formatDateTimeJakarta } from "../lib/format";
+import { GofoodSettings } from "./GofoodSettings";
 
 const PROFILE_QUERY_KEY = ["business-profile"] as const;
 
@@ -185,21 +188,17 @@ function SettingsSkeleton() {
   );
 }
 
-export function SettingsPage() {
+function BusinessProfileSection() {
   const profile = useQuery({
     queryKey: PROFILE_QUERY_KEY,
     queryFn: () => api<BusinessProfileResponse>("/api/business-profile")
   });
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <Rise>
-        <PageHeader
-          title="Info Usaha"
-          subtitle="Bot WhatsApp menjawab pertanyaan pelanggan dari info di halaman ini."
-        />
-      </Rise>
-
+    <>
+      <p className="mb-3 text-sm text-ink-500">
+        Bot WhatsApp menjawab pertanyaan pelanggan dari info di bawah ini.
+      </p>
       {profile.isPending ? <SettingsSkeleton /> : null}
       {profile.isError ? (
         <ErrorNote message="Gagal memuat info usaha. Coba muat ulang halaman." />
@@ -213,6 +212,34 @@ export function SettingsPage() {
           ))}
         </StaggerList>
       ) : null}
+    </>
+  );
+}
+
+type SettingsTab = "profile" | "gofood";
+
+const SETTINGS_TABS: readonly TabItem<SettingsTab>[] = [
+  { id: "profile", label: "Info Usaha" },
+  { id: "gofood", label: "GoFood" }
+];
+
+export function SettingsPage({ initialTab = "profile" }: { initialTab?: SettingsTab }) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
+
+  return (
+    <div className="mx-auto max-w-2xl">
+      <Rise>
+        <PageHeader
+          title="Setelan"
+          subtitle="Info usaha untuk bot WhatsApp dan integrasi GoFood."
+        />
+      </Rise>
+
+      <div className="mb-4">
+        <Tabs items={SETTINGS_TABS} activeId={tab} onChange={setTab} />
+      </div>
+
+      {tab === "profile" ? <BusinessProfileSection /> : <GofoodSettings />}
     </div>
   );
 }

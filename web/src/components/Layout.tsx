@@ -13,7 +13,7 @@ const NAV_ITEMS = [
   { to: "/expenses", label: "Pengeluaran", end: false },
   { to: "/reports", label: "Laporan", end: false },
   { to: "/bot", label: "Bot", end: false },
-  { to: "/settings", label: "Info Usaha", shortLabel: "Info", end: false }
+  { to: "/settings", label: "Setelan", shortLabel: "Setelan", end: false }
 ];
 
 export function Layout() {

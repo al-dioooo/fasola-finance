@@ -36,5 +36,15 @@ export const expenseCategoryLabels: Record<ExpenseCategory, string> = {
   lainnya: "Lainnya"
 };
 
+// Order channel labels. Unknown/future sources fall back to the raw value.
+export const sourceLabels: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  gofood: "GoFood"
+};
+
+export function sourceLabel(source: string): string {
+  return sourceLabels[source] ?? source;
+}
+
 // Status badge colors live with the Badge components in
 // components/ui/Badge.tsx — this module only owns the wording.

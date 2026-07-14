@@ -17,6 +17,8 @@ export interface ProductRecord {
   notes: string | null;
   // Customer-facing copy the bot quotes when answering "what's in this dish".
   description: string | null;
+  // Public image URL for the GoFood catalog; set via the image upload flow.
+  imageUrl: string | null;
   updatedAt: string;
 }
 
@@ -61,6 +63,7 @@ interface ProductRow {
   variants_json: string;
   notes: string | null;
   description: string | null;
+  image_url: string | null;
   updated_at: string;
 }
 
@@ -75,6 +78,7 @@ const SELECT_COLUMNS = `
   variants_json,
   notes,
   description,
+  image_url,
   updated_at
 `;
 
@@ -193,6 +197,21 @@ export function createProductStore(db: Db) {
       const product = normalizeUpdateInput(current, input);
       await db.query(UPDATE_SQL, toProductParams(product));
       return { status: "updated", product };
+    },
+
+    // Dedicated image writer (the general update never touches image_url so
+    // editing name/price can't wipe the photo). Returns null if the product is
+    // gone.
+    async setImageUrl(productId: string, imageUrl: string): Promise<ProductRecord | null> {
+      const result = await db.query<ProductRow>(
+        `UPDATE products
+         SET image_url = $2, updated_at = $3
+         WHERE product_id = $1
+         RETURNING ${SELECT_COLUMNS}`,
+        [productId, imageUrl, isoUtcNow()]
+      );
+      const row = result.rows[0];
+      return row ? mapProductRow(row) : null;
     }
   };
 }
@@ -222,6 +241,7 @@ function normalizeCreateInput(productId: string, input: CreateProductInput): Pro
     variants: normalizeStringList(input.variants ?? []),
     notes: normalizeNullableString(input.notes ?? null),
     description: normalizeNullableString(input.description ?? null),
+    imageUrl: null,
     updatedAt: isoUtcNow()
   };
 }
@@ -244,6 +264,7 @@ function normalizeUpdateInput(current: ProductRecord, input: UpdateProductInput)
       input.description !== undefined
         ? normalizeNullableString(input.description)
         : current.description,
+    imageUrl: current.imageUrl,
     updatedAt: isoUtcNow()
   };
 }
@@ -277,6 +298,7 @@ function mapProductRow(row: ProductRow): ProductRecord {
     variants: parseStringList(row.variants_json),
     notes: row.notes,
     description: row.description,
+    imageUrl: row.image_url,
     updatedAt: row.updated_at
   };
 }

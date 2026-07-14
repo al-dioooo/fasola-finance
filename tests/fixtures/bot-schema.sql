@@ -24,13 +24,20 @@ CREATE TABLE IF NOT EXISTS orders (
   ai_confidence DOUBLE PRECISION,
   missing_fields_json TEXT NOT NULL DEFAULT '[]',
   admin_notified_at TEXT,
-  source TEXT NOT NULL DEFAULT 'whatsapp'
+  source TEXT NOT NULL DEFAULT 'whatsapp',
+  -- Bot migration 007: GoFood channel identifiers (NULL for WhatsApp orders).
+  external_order_number TEXT,
+  gofood_pin TEXT,
+  outlet_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_customer_created_at
   ON orders (customer_wa, created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_status_created_at
   ON orders (order_status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_external_order_number
+  ON orders (external_order_number)
+  WHERE external_order_number IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS products (
   product_id TEXT PRIMARY KEY,
@@ -45,7 +52,8 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
   description TEXT,
-  stock_quantity INTEGER
+  stock_quantity INTEGER,
+  image_url TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -114,3 +122,20 @@ INSERT INTO business_profile (profile_key, profile_value) VALUES
   ('promos', ''),
   ('about', '')
   ON CONFLICT (profile_key) DO NOTHING;
+
+-- Bot migration 007: GoFood credentials/config, written by this dashboard,
+-- read by the bot. Key-value like business_profile.
+CREATE TABLE IF NOT EXISTS gofood_settings (
+  config_key TEXT PRIMARY KEY,
+  config_value TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+);
+
+INSERT INTO gofood_settings (config_key, config_value) VALUES
+  ('client_id', ''),
+  ('client_secret', ''),
+  ('partner_id', ''),
+  ('outlet_id', ''),
+  ('enabled', 'false'),
+  ('environment', 'sandbox')
+  ON CONFLICT (config_key) DO NOTHING;

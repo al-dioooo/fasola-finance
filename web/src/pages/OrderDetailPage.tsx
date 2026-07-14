@@ -17,6 +17,7 @@ import {
   Button,
   Card,
   CardTitle,
+  ChannelBadge,
   ErrorNote,
   OrderStatusBadge,
   PaymentStatusBadge,
@@ -66,6 +67,7 @@ function WhatsAppChatLink({ customerWa }: { customerWa: string }) {
 }
 
 function OrderHeaderCard({ order }: { order: OrderDetail }) {
+  const isGofood = order.source === "gofood";
   return (
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -80,16 +82,21 @@ function OrderHeaderCard({ order }: { order: OrderDetail }) {
         <div className="flex flex-wrap gap-1.5">
           <OrderStatusBadge status={order.orderStatus} />
           <PaymentStatusBadge status={order.paymentStatus} />
+          <ChannelBadge source={order.source} />
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-cream-200 pt-3.5">
         <div>
           <p className="text-sm font-semibold text-ink-900">
-            {order.customerName ?? order.customerWa}
+            {order.customerName ?? (isGofood ? "Pelanggan GoFood" : order.customerWa)}
           </p>
-          <p className="text-xs text-ink-500 tabular-nums">{order.customerWa}</p>
+          {isGofood ? (
+            <p className="text-xs text-ink-500">Pesanan via GoFood (Gojek)</p>
+          ) : (
+            <p className="text-xs text-ink-500 tabular-nums">{order.customerWa}</p>
+          )}
         </div>
-        <WhatsAppChatLink customerWa={order.customerWa} />
+        {isGofood ? null : <WhatsAppChatLink customerWa={order.customerWa} />}
       </div>
     </Card>
   );
@@ -357,6 +364,16 @@ export function OrderDetailPage() {
             <Card>
               <CardTitle>Info Pesanan</CardTitle>
               <dl className="mt-3 space-y-3.5">
+                {data.order.source === "gofood" ? (
+                  <>
+                    {data.order.channelOrderNumber ? (
+                      <InfoRow label="No. Pesanan GoFood" value={data.order.channelOrderNumber} />
+                    ) : null}
+                    {data.order.pickupPin ? (
+                      <InfoRow label="PIN Driver" value={data.order.pickupPin} />
+                    ) : null}
+                  </>
+                ) : null}
                 <InfoRow label="Alamat" value={data.order.address || "—"} preWrap />
                 <InfoRow label="Catatan" value={data.order.notes ?? "—"} preWrap />
                 <InfoRow label="Waktu Diminta" value={data.order.requestedTime ?? "—"} />
@@ -365,6 +382,17 @@ export function OrderDetailPage() {
             </Card>
           </StaggerItem>
 
+          {data.order.source === "gofood" ? (
+            <StaggerItem>
+              <Card>
+                <CardTitle>Status</CardTitle>
+                <p className="mt-2 text-sm text-ink-500">
+                  Status pesanan dan pembayaran GoFood dikelola otomatis oleh GoFood/Gojek dan
+                  diperbarui lewat webhook. Tidak dapat diubah manual dari sini.
+                </p>
+              </Card>
+            </StaggerItem>
+          ) : (
           <StaggerItem>
             <Card>
               <CardTitle>Ubah Status</CardTitle>
@@ -429,6 +457,7 @@ export function OrderDetailPage() {
               </div>
             </Card>
           </StaggerItem>
+          )}
 
           <StaggerItem>
             <RawDataSection order={data.order} />

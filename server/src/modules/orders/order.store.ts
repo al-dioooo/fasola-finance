@@ -22,6 +22,8 @@ export interface OrderListItem {
   estimatedSubtotal: number | null;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
+  // 'whatsapp' | 'gofood' (free text to tolerate future channels).
+  source: string;
 }
 
 export interface OrderDetail extends OrderListItem {
@@ -34,12 +36,17 @@ export interface OrderDetail extends OrderListItem {
   aiModel: string | null;
   aiConfidence: number | null;
   missingFields: string[];
-  source: string;
+  // GoFood-only (null for WhatsApp orders): F-xxxx order number, driver/pickup
+  // PIN, and GoFood outlet id.
+  channelOrderNumber: string | null;
+  pickupPin: string | null;
+  outletId: string | null;
 }
 
 export interface ListOrdersFilters {
   statuses?: OrderStatus[];
   paymentStatus?: PaymentStatus;
+  source?: string;
   q?: string;
   createdFromUtc?: string;
   createdToUtc?: string;
@@ -63,6 +70,7 @@ interface OrderListRow {
   estimated_subtotal: number | null;
   payment_status: PaymentStatus;
   order_status: OrderStatus;
+  source: string;
 }
 
 interface OrderRow extends OrderListRow {
@@ -76,7 +84,9 @@ interface OrderRow extends OrderListRow {
   ai_confidence: number | null;
   missing_fields_json: string;
   admin_notified_at: string | null;
-  source: string;
+  external_order_number: string | null;
+  gofood_pin: string | null;
+  outlet_id: string | null;
 }
 
 const LIST_COLUMNS = `
@@ -89,7 +99,8 @@ const LIST_COLUMNS = `
   total_quantity,
   estimated_subtotal,
   payment_status,
-  order_status
+  order_status,
+  source
 `;
 
 // Bot-owned tables store timestamps as ISO-8601 TEXT with explicit zone.
@@ -119,6 +130,11 @@ export function createOrderStore(db: Db) {
       if (filters.paymentStatus) {
         params.push(filters.paymentStatus);
         conditions.push(`payment_status = $${params.length}`);
+      }
+
+      if (filters.source) {
+        params.push(filters.source);
+        conditions.push(`source = $${params.length}`);
       }
 
       if (filters.q) {
@@ -241,7 +257,8 @@ function mapOrderListRow(row: OrderListRow): OrderListItem {
     totalQuantity: row.total_quantity,
     estimatedSubtotal: row.estimated_subtotal,
     paymentStatus: row.payment_status,
-    orderStatus: row.order_status
+    orderStatus: row.order_status,
+    source: row.source
   };
 }
 
@@ -257,7 +274,9 @@ function mapOrderRow(row: OrderRow): OrderDetail {
     aiModel: row.ai_model,
     aiConfidence: row.ai_confidence,
     missingFields: parseStringArray(row.missing_fields_json),
-    source: row.source
+    channelOrderNumber: row.external_order_number,
+    pickupPin: row.gofood_pin,
+    outletId: row.outlet_id
   };
 }
 

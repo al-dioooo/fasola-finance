@@ -1,6 +1,6 @@
 export { Button } from "./Button";
 export { Card, CardTitle, PageHeader } from "./Card";
-export { Badge, OrderStatusBadge, PaymentStatusBadge, StockStatusBadge } from "./Badge";
+export { Badge, ChannelBadge, OrderStatusBadge, PaymentStatusBadge, StockStatusBadge } from "./Badge";
 export { Field, Input, Select, Textarea } from "./Field";
 export { Tabs, FilterChips, type TabItem } from "./Tabs";
 export { Modal } from "./Modal";

@@ -2,8 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type FormEvent } from "react";
 
+import { useRef } from "react";
+
 import { api, ApiError } from "../api/client";
-import type { Product, ProductsResponse, StockStatus } from "../api/types";
+import type {
+  GofoodStatusResponse,
+  GofoodSyncResult,
+  Product,
+  ProductsResponse,
+  StockStatus
+} from "../api/types";
 import {
   Button,
   Card,
@@ -180,6 +188,94 @@ function DescriptionEditor({
   );
 }
 
+// GoFood requires square PNGs ≤1MB. Center-crop + downscale to a square PNG in
+// the browser so the owner can upload any phone photo and the server-side
+// validation (PNG + 1:1 + size) always passes.
+async function fileToSquarePngBase64(file: File, size = 640): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Canvas tidak didukung di peramban ini.");
+    }
+    const scale = Math.max(size / bitmap.width, size / bitmap.height);
+    const drawWidth = bitmap.width * scale;
+    const drawHeight = bitmap.height * scale;
+    ctx.drawImage(bitmap, (size - drawWidth) / 2, (size - drawHeight) / 2, drawWidth, drawHeight);
+    const dataUrl = canvas.toDataURL("image/png");
+    return dataUrl.split(",")[1] ?? "";
+  } finally {
+    bitmap.close();
+  }
+}
+
+function ProductImageEditor({ product }: { product: Product }) {
+  const queryClient = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const imageBase64 = await fileToSquarePngBase64(file);
+      return api<{ product: Product }>(
+        `/api/products/${encodeURIComponent(product.productId)}/image`,
+        { method: "POST", body: { imageBase64, contentType: "image/png" } }
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+    }
+  });
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="size-16 shrink-0 overflow-hidden rounded-xl border border-cream-200 bg-cream-100">
+        {product.imageUrl ? (
+          <img
+            src={product.imageUrl}
+            alt={product.productName}
+            className="size-full object-cover"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center text-xl text-ink-300">🍽️</div>
+        )}
+      </div>
+      <div className="min-w-0">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              upload.mutate(file);
+            }
+            event.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          loading={upload.isPending}
+          onClick={() => inputRef.current?.click()}
+        >
+          {product.imageUrl ? "Ganti Foto" : "Tambah Foto"}
+        </Button>
+        <p className="mt-1 text-[11px] text-ink-400">Untuk GoFood — dipotong jadi persegi otomatis.</p>
+        {upload.isError ? (
+          <p className="mt-1 text-[11px] text-sambal-700">
+            {upload.error instanceof ApiError ? upload.error.message : "Gagal mengunggah foto."}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function ProductCard({ product }: { product: Product }) {
   const queryClient = useQueryClient();
   const [editingPrice, setEditingPrice] = useState(false);
@@ -210,6 +306,8 @@ function ProductCard({ product }: { product: Product }) {
         </div>
         <StockStatusBadge status={product.stockStatus} />
       </div>
+
+      <ProductImageEditor product={product} />
 
       <AnimatePresence mode="wait" initial={false}>
         {editingPrice ? (
@@ -455,6 +553,84 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   );
 }
 
+function GofoodSyncBar() {
+  const status = useQuery({
+    queryKey: ["gofood", "status"],
+    queryFn: () => api<GofoodStatusResponse>("/api/gofood/status"),
+    staleTime: 30_000
+  });
+
+  const sync = useMutation({
+    mutationFn: () => api<GofoodSyncResult>("/api/gofood/sync-menu", { method: "POST" })
+  });
+
+  // Only surface the control once GoFood is set up.
+  if (!status.data?.enabled || !status.data.configured) {
+    return null;
+  }
+
+  const result = sync.data;
+  const issues = result ? [...result.excluded, ...result.warnings] : [];
+
+  return (
+    <Card className="mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink-900">Sinkronkan menu ke GoFood</p>
+          <p className="text-xs text-ink-400">
+            Kirim menu, harga, stok, dan foto saat ini ke outlet GoFood Anda.
+          </p>
+        </div>
+        <Button type="button" size="sm" loading={sync.isPending} onClick={() => sync.mutate()}>
+          Sync ke GoFood
+        </Button>
+      </div>
+
+      {sync.isError ? (
+        <div className="mt-3">
+          <ErrorNote message="Gagal menyinkronkan. Pastikan order-bot berjalan." />
+        </div>
+      ) : null}
+
+      {result ? (
+        <div className="mt-3 text-xs">
+          <p className="font-semibold text-ink-700">
+            {result.status === "success" || result.status === "partial"
+              ? `${result.itemsPushed}/${result.itemsTotal} menu terkirim.`
+              : result.status === "no_items"
+                ? "Tidak ada menu yang bisa dikirim."
+                : result.status === "not_configured"
+                  ? "Kredensial GoFood belum lengkap (atur di Setelan)."
+                  : `Gagal: ${result.error ?? "kesalahan tidak diketahui"}.`}
+          </p>
+          {issues.length > 0 ? (
+            <ul className="mt-1 list-disc pl-4 text-ink-500">
+              {issues.map((issue) => (
+                <li key={`${issue.productId}-${issue.reason}`}>
+                  {issue.name || issue.productId}: {syncIssueLabel(issue.reason)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function syncIssueLabel(reason: string): string {
+  switch (reason) {
+    case "hidden":
+      return "disembunyikan, tidak dikirim";
+    case "missing_price":
+      return "belum ada harga, tidak dikirim";
+    case "missing_image":
+      return "belum ada foto";
+    default:
+      return reason;
+  }
+}
+
 function MenuGridSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -497,6 +673,8 @@ export function MenuPage() {
       <PendingChangesBanner
         visible={Boolean(products.data && products.data.pendingMenuChanges > 0)}
       />
+
+      <GofoodSyncBar />
 
       <Rise>
         {products.isPending ? <MenuGridSkeleton /> : null}

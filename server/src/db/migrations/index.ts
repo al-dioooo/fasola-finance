@@ -35,6 +35,26 @@ export const migrations: Migration[] = [
         updated_at timestamptz NOT NULL DEFAULT now()
       )`
     ]
+  },
+  {
+    // History of dashboard-triggered GoFood catalog syncs (Phase 2 writes rows;
+    // created now so the sync-log endpoint has a table from day one). Dashboard
+    // -owned (fin_*). GoFood credentials themselves live in the bot-owned
+    // gofood_settings table (see fasola-order-bot migration 007).
+    id: "003_fin_gofood_sync_runs",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS fin_gofood_sync_runs (
+        run_id TEXT PRIMARY KEY,
+        started_at timestamptz NOT NULL DEFAULT now(),
+        status TEXT NOT NULL,
+        items_total INTEGER,
+        items_pushed INTEGER,
+        errors_json jsonb NOT NULL DEFAULT '[]',
+        message TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_fin_gofood_sync_runs_started_at
+        ON fin_gofood_sync_runs (started_at DESC)`
+    ]
   }
 ];
 

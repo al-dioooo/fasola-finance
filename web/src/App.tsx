@@ -59,6 +59,7 @@ export function App() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/bot" element={<BotOpsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/gofood" element={<SettingsPage initialTab="gofood" />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -27,6 +27,8 @@ export interface OrderItem {
   notes?: string | null;
 }
 
+export type OrderSource = "whatsapp" | "gofood";
+
 export interface OrderListItem {
   orderId: string;
   createdAt: string;
@@ -38,6 +40,7 @@ export interface OrderListItem {
   estimatedSubtotal: number | null;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
+  source: string;
 }
 
 export interface OrderDetail extends OrderListItem {
@@ -50,7 +53,10 @@ export interface OrderDetail extends OrderListItem {
   aiModel: string | null;
   aiConfidence: number | null;
   missingFields: string[];
-  source: string;
+  // GoFood-only (null for WhatsApp orders).
+  channelOrderNumber: string | null;
+  pickupPin: string | null;
+  outletId: string | null;
 }
 
 export interface OrdersListResponse {
@@ -134,6 +140,7 @@ export interface Product {
   variants: string[];
   notes: string | null;
   description: string | null;
+  imageUrl: string | null;
   updatedAt: string;
 }
 
@@ -244,4 +251,81 @@ export interface AiLogsResponse {
   total: number;
   page: number;
   limit: number;
+}
+
+// --- GoFood (GoBiz) integration ---
+
+export type GofoodEnvironment = "sandbox" | "production";
+
+export interface GofoodSettings {
+  clientId: string;
+  partnerId: string;
+  outletId: string;
+  enabled: boolean;
+  environment: GofoodEnvironment;
+  // The client secret is never returned; only whether one is set + its last 4.
+  secretSet: boolean;
+  secretLast4: string | null;
+  updatedAt: string | null;
+}
+
+export interface GofoodSettingsResponse {
+  settings: GofoodSettings;
+}
+
+export interface GofoodSettingsUpdate {
+  clientId?: string;
+  clientSecret?: string;
+  partnerId?: string;
+  outletId?: string;
+  enabled?: boolean;
+  environment?: GofoodEnvironment;
+}
+
+export interface GofoodStatusResponse {
+  botReachable: boolean;
+  enabled: boolean;
+  configured: boolean;
+  environment: string;
+  outletId: string;
+  signatureVerification: boolean;
+}
+
+export interface GofoodTestConnectionResponse {
+  ok: boolean;
+  message: string;
+}
+
+export interface GofoodSubscribeResponse {
+  results: { event: string; ok: boolean; error?: string }[];
+}
+
+export interface GofoodSyncRun {
+  runId: string;
+  startedAt: string;
+  status: string;
+  itemsTotal: number | null;
+  itemsPushed: number | null;
+  errors: unknown[];
+  message: string | null;
+}
+
+export interface GofoodSyncLogResponse {
+  items: GofoodSyncRun[];
+}
+
+export interface GofoodCatalogIssue {
+  productId: string;
+  name: string;
+  reason: string;
+}
+
+export interface GofoodSyncResult {
+  status: string;
+  itemsTotal: number;
+  itemsPushed: number;
+  excluded: GofoodCatalogIssue[];
+  warnings: GofoodCatalogIssue[];
+  requestId?: string;
+  error?: string;
 }
