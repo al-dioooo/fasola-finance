@@ -129,6 +129,23 @@ export interface ProfitResponse {
   expensesByCategory: { category: ExpenseCategory; total: number }[];
 }
 
+// One variant option: a name plus its GoFood price delta (± whole rupiah added
+// to the base price) and availability.
+export interface VariantOption {
+  name: string;
+  priceDelta: number;
+  inStock: boolean;
+}
+
+// Variant group config the dashboard edits and the bot pushes to GoFood.
+export interface VariantConfig {
+  // required = customer must pick (GoBiz min_quantity >= 1).
+  required: boolean;
+  // How many options a customer may pick (GoBiz max_quantity).
+  maxSelectable: number;
+  options: VariantOption[];
+}
+
 export interface Product {
   productId: string;
   productName: string;
@@ -140,7 +157,12 @@ export interface Product {
   variants: string[];
   notes: string | null;
   description: string | null;
+  // Exact portion count; null = not tracked. Drives quantity-based sold-out and
+  // GoFood in_stock. Both writers may set it (bot via /menu qty=, dashboard here).
+  stockQuantity: number | null;
   imageUrl: string | null;
+  // Per-variant pricing/stock + selection rules (merged names + pricing).
+  variantConfig: VariantConfig;
   updatedAt: string;
 }
 
@@ -328,4 +350,12 @@ export interface GofoodSyncResult {
   warnings: GofoodCatalogIssue[];
   requestId?: string;
   error?: string;
+}
+
+// Whether the live menu has drifted from what GoFood last received (the push is
+// a manual full-catalog overwrite). Drives the "needs sync" badge.
+export interface GofoodSyncStateResponse {
+  lastSyncAt: string | null;
+  menuUpdatedAt: string | null;
+  syncNeeded: boolean;
 }

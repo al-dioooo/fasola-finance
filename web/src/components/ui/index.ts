@@ -1,7 +1,8 @@
 export { Button } from "./Button";
 export { Card, CardTitle, PageHeader } from "./Card";
 export { Badge, ChannelBadge, OrderStatusBadge, PaymentStatusBadge, StockStatusBadge } from "./Badge";
-export { Field, Input, Select, Textarea } from "./Field";
+export { Field, Input, Textarea } from "./Field";
+export { DropUpSelect, type DropUpOption } from "./DropUpSelect";
 export { Tabs, FilterChips, type TabItem } from "./Tabs";
 export { Modal } from "./Modal";
 export { Skeleton, SkeletonCard, SkeletonRows, ErrorNote, EmptyState } from "./Feedback";

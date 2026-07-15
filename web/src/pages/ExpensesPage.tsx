@@ -10,13 +10,13 @@ import {
   Button,
   Card,
   CardTitle,
+  DropUpSelect,
   EmptyState,
   ErrorNote,
   Field,
   Input,
   PageHeader,
   Pagination,
-  Select,
   SkeletonRows
 } from "../components/ui";
 import { AnimatedNumber, Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
@@ -97,18 +97,6 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
-// Shared <option> list for every category select on the page.
-function CategoryOptions({ options }: { options: CategoryOption[] }) {
-  return (
-    <>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </>
-  );
-}
 
 // Numeric rupiah input with an "Rp" prefix affordance and a live formatted hint.
 function AmountField({
@@ -198,12 +186,12 @@ function QuickAddCard({
           />
         </Field>
         <Field label="Kategori">
-          <Select
+          <DropUpSelect
+            ariaLabel="Kategori"
             value={category}
-            onChange={(event) => setCategory(event.target.value as ExpenseCategory)}
-          >
-            <CategoryOptions options={categoryOptions} />
-          </Select>
+            onChange={(value) => setCategory(value as ExpenseCategory)}
+            options={categoryOptions}
+          />
         </Field>
         <AmountField label="Jumlah" value={amount} onChange={setAmount} placeholder="cth. 50000" />
         <Field label="Keterangan (opsional)">
@@ -311,14 +299,12 @@ function ExpenseEditForm({
         />
       </Field>
       <Field label="Kategori">
-        <Select
+        <DropUpSelect
+          ariaLabel="Kategori"
           value={editing.category}
-          onChange={(event) =>
-            onChange({ ...editing, category: event.target.value as ExpenseCategory })
-          }
-        >
-          <CategoryOptions options={categoryOptions} />
-        </Select>
+          onChange={(value) => onChange({ ...editing, category: value as ExpenseCategory })}
+          options={categoryOptions}
+        />
       </Field>
       <AmountField
         label="Jumlah"
@@ -475,16 +461,15 @@ export function ExpensesPage() {
                 />
               </Field>
               <Field label="Kategori">
-                <Select
+                <DropUpSelect
+                  ariaLabel="Kategori"
                   value={categoryFilter}
-                  onChange={(event) => {
-                    setCategoryFilter(event.target.value);
+                  onChange={(value) => {
+                    setCategoryFilter(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">Semua kategori</option>
-                  <CategoryOptions options={categoryOptions} />
-                </Select>
+                  options={[{ value: "", label: "Semua kategori" }, ...categoryOptions]}
+                />
               </Field>
             </div>
 

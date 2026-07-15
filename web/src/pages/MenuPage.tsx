@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type FormEvent } from "react";
 
@@ -8,36 +8,82 @@ import { api, ApiError } from "../api/client";
 import type {
   GofoodStatusResponse,
   GofoodSyncResult,
+  GofoodSyncStateResponse,
   Product,
   ProductsResponse,
-  StockStatus
+  StockStatus,
+  VariantConfig,
+  VariantOption
 } from "../api/types";
 import {
+  Badge,
   Button,
   Card,
+  DropUpSelect,
   EmptyState,
   ErrorNote,
   Field,
   Input,
   Modal,
   PageHeader,
-  Select,
   SkeletonCard,
   StockStatusBadge,
   Textarea
 } from "../components/ui";
 import { Rise, StaggerItem, StaggerList } from "../components/motion/primitives";
-import { formatIDR } from "../lib/format";
+import { formatDateTimeJakarta, formatIDR } from "../lib/format";
 import { stockStatusLabels } from "../lib/labels";
 
 const PRODUCTS_QUERY_KEY = ["products"] as const;
+const GOFOOD_SYNC_STATE_KEY = ["gofood", "sync-state"] as const;
+
+// Any menu write may make GoFood stale, so refresh the products list and the
+// "needs sync" badge together.
+async function invalidateMenuQueries(queryClient: QueryClient): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY }),
+    queryClient.invalidateQueries({ queryKey: GOFOOD_SYNC_STATE_KEY })
+  ]);
+}
 
 const STOCK_STATUSES: StockStatus[] = ["Available", "Limited", "Sold Out", "Hidden"];
+
+const STOCK_STATUS_OPTIONS = STOCK_STATUSES.map((status) => ({
+  value: status,
+  label: stockStatusLabels[status]
+}));
 
 type ProductPatch =
   | { stockStatus: StockStatus }
   | { price: number }
-  | { description: string | null };
+  | { description: string | null }
+  | { stockQuantity: number | null }
+  | { variantConfig: VariantConfig };
+
+// "+Rp5.000" / "−Rp2.000" / "" (no delta). Uses a minus sign for reductions.
+function formatPriceDelta(delta: number): string {
+  if (delta === 0) {
+    return "";
+  }
+  const sign = delta > 0 ? "+" : "−";
+  return `${sign}${formatIDR(Math.abs(delta))}`;
+}
+
+function variantSummary(options: VariantOption[]): string {
+  return options
+    .map((option) => {
+      const delta = formatPriceDelta(option.priceDelta);
+      const parts = [option.name];
+      if (delta) {
+        parts.push(`(${delta})`);
+      }
+      if (!option.inStock) {
+        parts.push("· habis");
+      }
+      return parts.join(" ");
+    })
+    .join(", ");
+}
 
 interface NewProductBody {
   productName: string;
@@ -48,6 +94,26 @@ interface NewProductBody {
   variants: string[];
   notes: string | null;
   description: string | null;
+  stockQuantity: number | null;
+}
+
+// "" = untracked (unlimited); otherwise a non-negative integer portion count.
+function isValidStockInput(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return true;
+  }
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 0;
+}
+
+function parseStockInput(value: string): number | null {
+  const trimmed = value.trim();
+  return trimmed === "" ? null : Number(trimmed);
+}
+
+function stockQuantityLabel(quantity: number | null): string {
+  return quantity === null ? "Tak terbatas" : `${quantity} porsi`;
 }
 
 function splitList(value: string): string[] {
@@ -188,6 +254,235 @@ function DescriptionEditor({
   );
 }
 
+function StockQuantityEditor({
+  product,
+  onSave,
+  onCancel,
+  saving
+}: {
+  product: Product;
+  onSave: (quantity: number | null) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [draft, setDraft] = useState(
+    product.stockQuantity === null ? "" : String(product.stockQuantity)
+  );
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!isValidStockInput(draft)) {
+      return;
+    }
+    onSave(parseStockInput(draft));
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-2">
+      <Field
+        label="Stok (porsi)"
+        hint="Kosongkan untuk stok tak terbatas. 0 porsi otomatis jadi Habis."
+      >
+        <div className="flex items-end gap-2">
+          <Input
+            type="number"
+            min="0"
+            step="1"
+            inputMode="numeric"
+            placeholder="Tak terbatas"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            autoFocus
+            className="flex-1"
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setDraft("")}
+            className="min-h-10 whitespace-nowrap"
+          >
+            Tak terbatas
+          </Button>
+        </div>
+      </Field>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
+          Batal
+        </Button>
+        <Button type="submit" size="sm" loading={saving} disabled={!isValidStockInput(draft)}>
+          Simpan
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+interface VariantOptionDraft {
+  name: string;
+  // Kept as a string so the number field can hold "", "-" mid-typing.
+  priceDelta: string;
+  inStock: boolean;
+}
+
+function parsePriceDelta(value: string): number {
+  const trimmed = value.trim();
+  if (trimmed === "" || trimmed === "-") {
+    return 0;
+  }
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) ? parsed : 0;
+}
+
+function VariantEditor({
+  product,
+  onSave,
+  onCancel,
+  saving
+}: {
+  product: Product;
+  onSave: (config: VariantConfig) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [options, setOptions] = useState<VariantOptionDraft[]>(
+    product.variantConfig.options.map((option) => ({
+      name: option.name,
+      priceDelta: option.priceDelta === 0 ? "" : String(option.priceDelta),
+      inStock: option.inStock
+    }))
+  );
+  const [required, setRequired] = useState(product.variantConfig.required);
+  const [maxSelectable, setMaxSelectable] = useState(product.variantConfig.maxSelectable);
+
+  const updateOption = (index: number, patch: Partial<VariantOptionDraft>) =>
+    setOptions((prev) => prev.map((option, i) => (i === index ? { ...option, ...patch } : option)));
+  const addOption = () =>
+    setOptions((prev) => [...prev, { name: "", priceDelta: "", inStock: true }]);
+  const removeOption = (index: number) =>
+    setOptions((prev) => prev.filter((_, i) => i !== index));
+
+  const namedCount = options.filter((option) => option.name.trim().length > 0).length;
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    const cleaned: VariantOption[] = options
+      .filter((option) => option.name.trim().length > 0)
+      .map((option) => ({
+        name: option.name.trim(),
+        priceDelta: parsePriceDelta(option.priceDelta),
+        inStock: option.inStock
+      }));
+    onSave({
+      required,
+      maxSelectable: Math.min(Math.max(1, maxSelectable), Math.max(1, cleaned.length)),
+      options: cleaned
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold tracking-wide text-ink-700 uppercase">
+          Varian &amp; Harga
+        </span>
+        <Button type="button" size="sm" variant="ghost" onClick={addOption}>
+          + Tambah
+        </Button>
+      </div>
+
+      {options.length === 0 ? (
+        <p className="text-xs text-ink-400 italic">
+          Belum ada varian. Tambah pilihan (mis. rasa/ukuran) dengan selisih harga untuk GoFood.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {options.map((option, index) => (
+            <li
+              key={index}
+              className="space-y-2 rounded-xl border border-cream-200 bg-cream-50 p-2.5"
+            >
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  value={option.name}
+                  placeholder="Nama varian, mis. Ayam"
+                  onChange={(event) => updateOption(index, { name: event.target.value })}
+                  className="flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeOption(index)}
+                  aria-label={`Hapus varian ${option.name || index + 1}`}
+                  className="shrink-0 rounded-full px-2 py-1 text-sm text-ink-400 hover:bg-sambal-50 hover:text-sambal-700"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="flex items-end gap-3">
+                <label className="flex-1">
+                  <span className="mb-1 block text-[11px] text-ink-400">Selisih harga (Rp)</span>
+                  <Input
+                    type="number"
+                    step="1"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={option.priceDelta}
+                    onChange={(event) => updateOption(index, { priceDelta: event.target.value })}
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 pb-2.5 text-xs font-semibold text-ink-700">
+                  <input
+                    type="checkbox"
+                    checked={option.inStock}
+                    onChange={(event) => updateOption(index, { inStock: event.target.checked })}
+                    className="size-4 rounded border-cream-300"
+                  />
+                  Tersedia
+                </label>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {namedCount > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700">
+            <input
+              type="checkbox"
+              checked={required}
+              onChange={(event) => setRequired(event.target.checked)}
+              className="size-4 rounded border-cream-300"
+            />
+            Wajib dipilih
+          </label>
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700">
+            Maks. pilihan
+            <input
+              type="number"
+              min="1"
+              max={namedCount}
+              value={maxSelectable}
+              onChange={(event) => setMaxSelectable(Math.max(1, Number(event.target.value) || 1))}
+              className="w-16 rounded-lg border border-cream-300 bg-cream-50 px-2 py-1 text-sm"
+            />
+          </label>
+        </div>
+      ) : null}
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
+          Batal
+        </Button>
+        <Button type="submit" size="sm" loading={saving}>
+          Simpan
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 // GoFood requires square PNGs ≤1MB. Center-crop + downscale to a square PNG in
 // the browser so the owner can upload any phone photo and the server-side
 // validation (PNG + 1:1 + size) always passes.
@@ -225,7 +520,7 @@ function ProductImageEditor({ product }: { product: Product }) {
       );
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+      await invalidateMenuQueries(queryClient);
     }
   });
 
@@ -280,6 +575,8 @@ function ProductCard({ product }: { product: Product }) {
   const queryClient = useQueryClient();
   const [editingPrice, setEditingPrice] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
+  const [editingStock, setEditingStock] = useState(false);
+  const [editingVariants, setEditingVariants] = useState(false);
 
   const update = useMutation({
     mutationFn: (patch: ProductPatch) =>
@@ -288,7 +585,7 @@ function ProductCard({ product }: { product: Product }) {
         body: patch
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+      await invalidateMenuQueries(queryClient);
     }
   });
 
@@ -344,9 +641,51 @@ function ProductCard({ product }: { product: Product }) {
         )}
       </AnimatePresence>
 
-      {product.variants.length > 0 ? (
-        <p className="text-xs text-ink-500">Varian: {product.variants.join(", ")}</p>
-      ) : null}
+      <AnimatePresence mode="wait" initial={false}>
+        {editingVariants ? (
+          <motion.div
+            key="variants-edit"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+          >
+            <VariantEditor
+              product={product}
+              saving={update.isPending}
+              onCancel={() => setEditingVariants(false)}
+              onSave={(variantConfig) =>
+                update.mutate({ variantConfig }, { onSuccess: () => setEditingVariants(false) })
+              }
+            />
+          </motion.div>
+        ) : (
+          <motion.button
+            key="variants-view"
+            type="button"
+            onClick={() => setEditingVariants(true)}
+            title="Ketuk untuk ubah varian & harga"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+            className="rounded-lg text-left hover:bg-cream-100"
+          >
+            <span className="block text-xs font-semibold tracking-wide text-ink-700 uppercase">
+              Varian
+            </span>
+            {product.variantConfig.options.length > 0 ? (
+              <span className="mt-0.5 block text-xs text-ink-500">
+                {variantSummary(product.variantConfig.options)}
+              </span>
+            ) : (
+              <span className="mt-0.5 block text-xs text-ink-300 italic">
+                Belum ada varian — ketuk untuk menambah.
+              </span>
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence mode="wait" initial={false}>
         {editingDescription ? (
@@ -392,22 +731,58 @@ function ProductCard({ product }: { product: Product }) {
         )}
       </AnimatePresence>
 
+      <AnimatePresence mode="wait" initial={false}>
+        {editingStock ? (
+          <motion.div
+            key="stock-edit"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+          >
+            <StockQuantityEditor
+              product={product}
+              saving={update.isPending}
+              onCancel={() => setEditingStock(false)}
+              onSave={(stockQuantity) =>
+                update.mutate({ stockQuantity }, { onSuccess: () => setEditingStock(false) })
+              }
+            />
+          </motion.div>
+        ) : (
+          <motion.button
+            key="stock-view"
+            type="button"
+            onClick={() => setEditingStock(true)}
+            title="Ketuk untuk ubah jumlah stok"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+            className="rounded-lg text-left hover:bg-cream-100"
+          >
+            <span className="block text-xs font-semibold tracking-wide text-ink-700 uppercase">
+              Stok
+            </span>
+            <span className="mt-0.5 block text-xs text-ink-500">
+              {stockQuantityLabel(product.stockQuantity)} — ketuk untuk ubah.
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+
       <div className="mt-auto">
         <Field
           label="Status Stok"
           hint='Pilih "Disembunyikan" untuk menyembunyikan menu dari pelanggan.'
         >
-          <Select
+          <DropUpSelect
+            ariaLabel="Status Stok"
             value={product.stockStatus}
-            onChange={(event) => update.mutate({ stockStatus: event.target.value as StockStatus })}
+            onChange={(value) => update.mutate({ stockStatus: value as StockStatus })}
             disabled={update.isPending}
-          >
-            {STOCK_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {stockStatusLabels[status]}
-              </option>
-            ))}
-          </Select>
+            options={STOCK_STATUS_OPTIONS}
+          />
         </Field>
       </div>
 
@@ -422,6 +797,7 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const [price, setPrice] = useState("");
   const [category, setCategory] = useState("");
   const [stockStatus, setStockStatus] = useState<StockStatus>("Available");
+  const [stock, setStock] = useState("");
   const [aliases, setAliases] = useState("");
   const [variants, setVariants] = useState("");
   const [notes, setNotes] = useState("");
@@ -430,12 +806,13 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
   const create = useMutation({
     mutationFn: (body: NewProductBody) => api<unknown>("/api/products", { method: "POST", body }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+      await invalidateMenuQueries(queryClient);
       onClose();
     }
   });
 
-  const canSubmit = productName.trim().length > 0 && isValidPriceInput(price);
+  const canSubmit =
+    productName.trim().length > 0 && isValidPriceInput(price) && isValidStockInput(stock);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -451,7 +828,8 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       aliases: splitList(aliases),
       variants: splitList(variants),
       notes: notes.trim() === "" ? null : notes.trim(),
-      description: description.trim() === "" ? null : description.trim()
+      description: description.trim() === "" ? null : description.trim(),
+      stockQuantity: parseStockInput(stock)
     });
   };
 
@@ -494,16 +872,24 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
       </Field>
 
       <Field label="Status Stok">
-        <Select
+        <DropUpSelect
+          ariaLabel="Status Stok"
           value={stockStatus}
-          onChange={(event) => setStockStatus(event.target.value as StockStatus)}
-        >
-          {STOCK_STATUSES.map((status) => (
-            <option key={status} value={status}>
-              {stockStatusLabels[status]}
-            </option>
-          ))}
-        </Select>
+          onChange={(value) => setStockStatus(value as StockStatus)}
+          options={STOCK_STATUS_OPTIONS}
+        />
+      </Field>
+
+      <Field label="Stok (porsi)" hint="Kosongkan untuk stok tak terbatas.">
+        <Input
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          placeholder="Tak terbatas"
+          value={stock}
+          onChange={(event) => setStock(event.target.value)}
+        />
       </Field>
 
       <Field label="Alias">
@@ -554,14 +940,25 @@ function AddProductForm({ onClose }: { onClose: () => void }) {
 }
 
 function GofoodSyncBar() {
+  const queryClient = useQueryClient();
   const status = useQuery({
     queryKey: ["gofood", "status"],
     queryFn: () => api<GofoodStatusResponse>("/api/gofood/status"),
     staleTime: 30_000
   });
 
+  const syncState = useQuery({
+    queryKey: GOFOOD_SYNC_STATE_KEY,
+    queryFn: () => api<GofoodSyncStateResponse>("/api/gofood/sync-state"),
+    staleTime: 15_000
+  });
+
   const sync = useMutation({
-    mutationFn: () => api<GofoodSyncResult>("/api/gofood/sync-menu", { method: "POST" })
+    mutationFn: () => api<GofoodSyncResult>("/api/gofood/sync-menu", { method: "POST" }),
+    onSuccess: async () => {
+      // A push updates "last synced", so the needs-sync badge should re-evaluate.
+      await queryClient.invalidateQueries({ queryKey: GOFOOD_SYNC_STATE_KEY });
+    }
   });
 
   // Only surface the control once GoFood is set up.
@@ -571,17 +968,43 @@ function GofoodSyncBar() {
 
   const result = sync.data;
   const issues = result ? [...result.excluded, ...result.warnings] : [];
+  const needsSync = syncState.data?.syncNeeded ?? false;
 
   return (
     <Card className="mb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-ink-900">Sinkronkan menu ke GoFood</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-ink-900">Sinkronkan menu ke GoFood</p>
+            {syncState.data ? (
+              needsSync ? (
+                <Badge className="bg-kunyit-100 text-kunyit-800">
+                  <span aria-hidden className="size-1.5 rounded-full bg-kunyit-500" />
+                  Perlu sinkron
+                </Badge>
+              ) : (
+                <Badge className="bg-pandan-100 text-pandan-800">
+                  <span aria-hidden className="size-1.5 rounded-full bg-pandan-500" />
+                  Tersinkron
+                </Badge>
+              )
+            ) : null}
+          </div>
           <p className="text-xs text-ink-400">
-            Kirim menu, harga, stok, dan foto saat ini ke outlet GoFood Anda.
+            {needsSync
+              ? "Menu berubah sejak sinkron terakhir — kirim ulang agar GoFood ikut terbarui."
+              : syncState.data?.lastSyncAt
+                ? `Terakhir sinkron ${formatDateTimeJakarta(syncState.data.lastSyncAt)}.`
+                : "Kirim menu, harga, stok, dan foto saat ini ke outlet GoFood Anda."}
           </p>
         </div>
-        <Button type="button" size="sm" loading={sync.isPending} onClick={() => sync.mutate()}>
+        <Button
+          type="button"
+          size="sm"
+          variant={needsSync ? "primary" : "secondary"}
+          loading={sync.isPending}
+          onClick={() => sync.mutate()}
+        >
           Sync ke GoFood
         </Button>
       </div>

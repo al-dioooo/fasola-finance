@@ -52,7 +52,7 @@ describe("GoFood API", () => {
   beforeEach(async () => {
     fetchMock.mockReset();
     testDb = await createMigratedTestDatabase();
-    app = await buildTestApp({ db: testDb.db, fetchImpl: fetchMock as unknown as typeof fetch });
+    app = await buildTestApp({ db: testDb.db, fetchImpl: fetchMock });
     cookie = await loginAndGetCookie(app);
   });
 
@@ -118,17 +118,19 @@ describe("GoFood API", () => {
   });
 
   it("reflects the bot status when reachable", async () => {
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation((input) => {
       if (toUrlString(input) === STATUS_URL) {
-        return jsonResponse({
-          enabled: true,
-          configured: true,
-          environment: "sandbox",
-          outletId: "M1",
-          signatureVerification: false
-        });
+        return Promise.resolve(
+          jsonResponse({
+            enabled: true,
+            configured: true,
+            environment: "sandbox",
+            outletId: "M1",
+            signatureVerification: false
+          })
+        );
       }
-      return jsonResponse({}, 404);
+      return Promise.resolve(jsonResponse({}, 404));
     });
 
     const response = await app.inject({ method: "GET", url: "/api/gofood/status", headers: { cookie } });
@@ -137,11 +139,11 @@ describe("GoFood API", () => {
   });
 
   it("sends the internal Bearer token and 502s when test-connection fails", async () => {
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation((input) => {
       if (toUrlString(input) === TEST_CONNECTION_URL) {
-        return jsonResponse({ error: "boom" }, 500);
+        return Promise.resolve(jsonResponse({ error: "boom" }, 500));
       }
-      return jsonResponse({}, 404);
+      return Promise.resolve(jsonResponse({}, 404));
     });
 
     const response = await app.inject({
@@ -150,7 +152,7 @@ describe("GoFood API", () => {
       headers: { cookie }
     });
     expect(response.statusCode).toBe(502);
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const init = fetchMock.mock.calls[0]?.[1];
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.authorization).toBe("Bearer ");
   });
@@ -162,18 +164,20 @@ describe("GoFood API", () => {
   });
 
   it("proxies sync-menu to the bot and records a run", async () => {
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation((input) => {
       if (toUrlString(input) === SYNC_CATALOG_URL) {
-        return jsonResponse({
-          status: "partial",
-          itemsTotal: 3,
-          itemsPushed: 2,
-          excluded: [{ productId: "PRD-003", name: "X", reason: "missing_price" }],
-          warnings: [],
-          requestId: "req-1"
-        });
+        return Promise.resolve(
+          jsonResponse({
+            status: "partial",
+            itemsTotal: 3,
+            itemsPushed: 2,
+            excluded: [{ productId: "PRD-003", name: "X", reason: "missing_price" }],
+            warnings: [],
+            requestId: "req-1"
+          })
+        );
       }
-      return jsonResponse({}, 404);
+      return Promise.resolve(jsonResponse({}, 404));
     });
 
     const response = await app.inject({

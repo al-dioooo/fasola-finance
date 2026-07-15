@@ -1,9 +1,4 @@
-import type {
-  InputHTMLAttributes,
-  ReactNode,
-  SelectHTMLAttributes,
-  TextareaHTMLAttributes
-} from "react";
+import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 
 const CONTROL_CLASSES =
   "w-full rounded-xl border border-cream-300 bg-cream-50 px-3.5 py-2.5 text-sm text-ink-900 placeholder:text-ink-300 focus:border-pandan-500 focus:outline-none disabled:bg-cream-200 disabled:text-ink-400";
@@ -32,10 +27,6 @@ export function Field({
 
 export function Input({ className = "", ...rest }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={`${CONTROL_CLASSES} ${className}`} {...rest} />;
-}
-
-export function Select({ className = "", ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={`${CONTROL_CLASSES} ${className}`} {...rest} />;
 }
 
 export function Textarea({ className = "", ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {

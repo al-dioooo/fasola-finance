@@ -17,10 +17,10 @@ import {
   Button,
   Card,
   CardTitle,
+  DropUpSelect,
   ErrorNote,
   Field,
   Input,
-  Select,
   SkeletonCard
 } from "../components/ui";
 import { formatDateTimeJakarta } from "../lib/format";
@@ -205,13 +205,15 @@ function GofoodSettingsForm({ settings }: { settings: GofoodSettingsData }) {
         </Field>
 
         <Field label="Lingkungan">
-          <Select
+          <DropUpSelect
+            ariaLabel="Lingkungan"
             value={environment}
-            onChange={(event) => setEnvironment(event.target.value === "production" ? "production" : "sandbox")}
-          >
-            <option value="sandbox">Sandbox (uji coba)</option>
-            <option value="production">Produksi</option>
-          </Select>
+            onChange={(value) => setEnvironment(value === "production" ? "production" : "sandbox")}
+            options={[
+              { value: "sandbox", label: "Sandbox (uji coba)" },
+              { value: "production", label: "Produksi" }
+            ]}
+          />
         </Field>
 
         <label className="flex items-center gap-2 text-sm font-semibold text-ink-700">
@@ -324,7 +326,7 @@ function GofoodSyncLogCard() {
       <CardTitle>Riwayat Sinkronisasi Menu</CardTitle>
       {items.length === 0 ? (
         <p className="mt-2 text-xs text-ink-400">
-          Belum ada. Sinkronisasi menu ke GoFood akan tersedia pada tahap berikutnya.
+          Belum ada. Buka halaman Menu, lalu tekan &ldquo;Sync ke GoFood&rdquo; untuk mengirim menu.
         </p>
       ) : (
         <ul className="mt-3 space-y-2">

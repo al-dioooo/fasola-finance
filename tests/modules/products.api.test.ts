@@ -293,6 +293,120 @@ describe("products API", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("stores and returns variant pricing, stock, and selection rules", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/products",
+      headers: { cookie },
+      payload: {
+        productName: "Kentang Goreng",
+        price: 12000,
+        stockStatus: "Available",
+        variants: ["Original"]
+      }
+    });
+    expect(created.statusCode).toBe(201);
+    const id = created.json<ProductBody>().product.productId;
+    // A names-only create defaults to required single-select, zero delta.
+    expect(created.json<ProductBody>().product.variantConfig).toEqual({
+      required: true,
+      maxSelectable: 1,
+      options: [{ name: "Original", priceDelta: 0, inStock: true }]
+    });
+
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/products/${id}`,
+      headers: { cookie },
+      payload: {
+        variantConfig: {
+          required: false,
+          maxSelectable: 2,
+          options: [
+            { name: "Original", priceDelta: 0, inStock: true },
+            { name: "Keju", priceDelta: 5000, inStock: true },
+            { name: "Balado", priceDelta: -2000, inStock: false }
+          ]
+        }
+      }
+    });
+    expect(patched.statusCode).toBe(200);
+    const product = patched.json<ProductBody>().product;
+    expect(product.variants).toEqual(["Original", "Keju", "Balado"]);
+    expect(product.variantConfig.required).toBe(false);
+    expect(product.variantConfig.maxSelectable).toBe(2);
+    expect(product.variantConfig.options).toEqual([
+      { name: "Original", priceDelta: 0, inStock: true },
+      { name: "Keju", priceDelta: 5000, inStock: true },
+      { name: "Balado", priceDelta: -2000, inStock: false }
+    ]);
+
+    // Persisted into the two coherent columns the bot reads.
+    const row = await testDb.db.query<{ variants_json: string; variant_pricing_json: string | null }>(
+      "SELECT variants_json, variant_pricing_json FROM products WHERE product_id = $1",
+      [id]
+    );
+    expect(JSON.parse(row.rows[0]!.variants_json)).toEqual(["Original", "Keju", "Balado"]);
+    const pricing = JSON.parse(row.rows[0]!.variant_pricing_json ?? "null") as {
+      selection: { min: number; max: number };
+      options: Record<string, { priceDelta: number; inStock: boolean }>;
+    };
+    expect(pricing.selection).toEqual({ min: 0, max: 2 });
+    expect(pricing.options.Keju).toEqual({ priceDelta: 5000, inStock: true });
+    expect(pricing.options.Balado).toEqual({ priceDelta: -2000, inStock: false });
+  });
+
+  it("tracks stock quantity and keeps it coherent with stock status", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/products",
+      headers: { cookie },
+      payload: {
+        productName: "Sate Ayam",
+        price: 20000,
+        stockStatus: "Available",
+        stockQuantity: 5
+      }
+    });
+    expect(created.statusCode).toBe(201);
+    const product = created.json<ProductBody>().product;
+    const id = product.productId;
+    expect(product.stockQuantity).toBe(5);
+    expect(product.isAvailable).toBe(true);
+
+    // Reaching 0 portions flips to Sold Out.
+    const zero = await app.inject({
+      method: "PATCH",
+      url: `/api/products/${id}`,
+      headers: { cookie },
+      payload: { stockQuantity: 0 }
+    });
+    const zeroProduct = zero.json<ProductBody>().product;
+    expect(zeroProduct.stockQuantity).toBe(0);
+    expect(zeroProduct.stockStatus).toBe("Sold Out");
+    expect(zeroProduct.isAvailable).toBe(false);
+
+    // Restocking (no explicit status) brings it back to Available.
+    const restock = await app.inject({
+      method: "PATCH",
+      url: `/api/products/${id}`,
+      headers: { cookie },
+      payload: { stockQuantity: 8 }
+    });
+    const restockProduct = restock.json<ProductBody>().product;
+    expect(restockProduct.stockStatus).toBe("Available");
+    expect(restockProduct.isAvailable).toBe(true);
+
+    // Clearing to null = untracked.
+    const untrack = await app.inject({
+      method: "PATCH",
+      url: `/api/products/${id}`,
+      headers: { cookie },
+      payload: { stockQuantity: null }
+    });
+    expect(untrack.json<ProductBody>().product.stockQuantity).toBeNull();
+  });
+
   it("rejects invalid bodies with 400", async () => {
     const badCreate = await app.inject({
       method: "POST",

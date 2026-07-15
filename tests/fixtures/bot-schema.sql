@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
   description TEXT,
   stock_quantity INTEGER,
-  image_url TEXT
+  image_url TEXT,
+  variant_pricing_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (

@@ -122,6 +122,21 @@ export interface RecordSyncRunInput {
   message: string | null;
 }
 
+// Whether the live menu has drifted from what GoFood last received. Because the
+// GoFood push is a manual full-catalog overwrite, any product write (dashboard
+// or bot /menu) after the last successful sync means GoFood is stale.
+export interface GofoodSyncState {
+  lastSyncAt: string | null;
+  menuUpdatedAt: string | null;
+  syncNeeded: boolean;
+}
+
+interface GofoodSyncStateRow {
+  menu_updated_at: string | null;
+  last_sync_at: string | null;
+  sync_needed: boolean | null;
+}
+
 export function createGofoodSyncRunStore(db: Db) {
   return {
     async listRuns(limit: number): Promise<GofoodSyncRun[]> {
@@ -150,6 +165,33 @@ export function createGofoodSyncRunStore(db: Db) {
           input.message
         ]
       );
+    },
+
+    // A push is "successful" for staleness purposes when status is success or
+    // partial (partial still overwrote the catalog with what was pushable).
+    // Timestamps are compared as timestamptz (products.updated_at is castable
+    // ISO-8601 text, started_at is timestamptz).
+    async getSyncState(): Promise<GofoodSyncState> {
+      const result = await db.query<GofoodSyncStateRow>(
+        `SELECT
+           to_char((SELECT MAX(updated_at::timestamptz) FROM products) AT TIME ZONE 'UTC',
+             'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS menu_updated_at,
+           to_char((SELECT MAX(started_at) FROM fin_gofood_sync_runs
+             WHERE status IN ('success', 'partial')) AT TIME ZONE 'UTC',
+             'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_sync_at,
+           COALESCE(
+             (SELECT MAX(updated_at::timestamptz) FROM products)
+               > (SELECT MAX(started_at) FROM fin_gofood_sync_runs
+                    WHERE status IN ('success', 'partial')),
+             (SELECT count(*) > 0 FROM products)
+           ) AS sync_needed`
+      );
+      const row = result.rows[0];
+      return {
+        lastSyncAt: row?.last_sync_at ?? null,
+        menuUpdatedAt: row?.menu_updated_at ?? null,
+        syncNeeded: Boolean(row?.sync_needed)
+      };
     }
   };
 }

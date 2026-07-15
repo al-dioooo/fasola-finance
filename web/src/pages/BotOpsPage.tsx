@@ -22,13 +22,13 @@ import {
   Button,
   Card,
   CardTitle,
+  DropUpSelect,
   EmptyState,
   ErrorNote,
   Field,
   Input,
   PageHeader,
   Pagination,
-  Select,
   Skeleton,
   SkeletonCard,
   SkeletonRows,
@@ -560,29 +560,26 @@ function MessageFilterForm({
         />
       </Field>
       <Field label="Pengirim">
-        <Select
+        <DropUpSelect
+          ariaLabel="Pengirim"
           value={draft.direction}
-          onChange={(event) => onDraftChange({ ...draft, direction: event.target.value })}
-        >
-          {DIRECTION_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
+          onChange={(value) => onDraftChange({ ...draft, direction: value })}
+          options={DIRECTION_OPTIONS}
+        />
       </Field>
       <Field label="Status">
-        <Select
+        <DropUpSelect
+          ariaLabel="Status"
           value={draft.processingStatus}
-          onChange={(event) => onDraftChange({ ...draft, processingStatus: event.target.value })}
-        >
-          <option value="">Semua Status</option>
-          {PROCESSING_STATUS_OPTIONS.map((value) => (
-            <option key={value} value={value}>
-              {processingStatusLabels[value] ?? value}
-            </option>
-          ))}
-        </Select>
+          onChange={(value) => onDraftChange({ ...draft, processingStatus: value })}
+          options={[
+            { value: "", label: "Semua Status" },
+            ...PROCESSING_STATUS_OPTIONS.map((value) => ({
+              value,
+              label: processingStatusLabels[value] ?? value
+            }))
+          ]}
+        />
       </Field>
       <Field label="Dari Tanggal">
         <Input

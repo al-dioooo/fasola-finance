@@ -13,6 +13,27 @@ import { MAX_IMAGE_BYTES, validateSquarePng } from "./product-image.js";
 // Bodies per web/src/api/types.ts Product. There is deliberately no DELETE:
 // the bot reads this table as its live menu, so removal is stockStatus
 // "Hidden" via PATCH.
+// stockQuantity: null = not tracked; >=0 = exact portion count. The store keeps
+// it coherent with stockStatus (0 => Sold Out, restock => Available).
+const stockQuantitySchema = z.number().int().min(0).nullable();
+
+// Full variant editor payload. priceDelta is whole rupiah added to the base
+// price (may be negative). The store derives variants_json + variant_pricing_json
+// from this; the bot reads them for the GoFood catalog push.
+const variantConfigSchema = z.object({
+  required: z.boolean(),
+  maxSelectable: z.number().int().min(1),
+  options: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1),
+        priceDelta: z.number().int(),
+        inStock: z.boolean()
+      })
+    )
+    .max(50)
+});
+
 const createProductBodySchema = z.object({
   productName: z.string().trim().min(1),
   price: z.number().int().positive(),
@@ -21,7 +42,8 @@ const createProductBodySchema = z.object({
   aliases: z.array(z.string()).optional(),
   variants: z.array(z.string()).optional(),
   notes: z.string().nullable().optional(),
-  description: z.string().nullable().optional()
+  description: z.string().nullable().optional(),
+  stockQuantity: stockQuantitySchema.optional()
 });
 
 const updateProductBodySchema = z.object({
@@ -32,7 +54,9 @@ const updateProductBodySchema = z.object({
   aliases: z.array(z.string()).optional(),
   variants: z.array(z.string()).optional(),
   notes: z.string().nullable().optional(),
-  description: z.string().nullable().optional()
+  description: z.string().nullable().optional(),
+  stockQuantity: stockQuantitySchema.optional(),
+  variantConfig: variantConfigSchema.optional()
 });
 
 const productParamsSchema = z.object({

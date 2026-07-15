@@ -1,5 +1,10 @@
 import type { Db } from "../../db/client.js";
 import type { StockStatus } from "../../shared/enums.js";
+import {
+  buildVariantConfig,
+  serializeVariantConfig,
+  type VariantConfig
+} from "./variant.js";
 
 // DTO shape matches web/src/api/types.ts Product. Semantics mirror the bot's
 // product store (fasola-order-bot/src/modules/products/product.store.ts):
@@ -13,12 +18,22 @@ export interface ProductRecord {
   price: number | null;
   stockStatus: StockStatus;
   isAvailable: boolean;
+  // Flat variant name list (mirrors the bot's variants_json); kept for display
+  // and as the identity the bot reads. variantConfig augments these with pricing.
   variants: string[];
   notes: string | null;
   // Customer-facing copy the bot quotes when answering "what's in this dish".
   description: string | null;
+  // Exact portion count; null = not tracked. Both writers may set it (bot via
+  // /menu qty=, dashboard via UI). Kept coherent with stockStatus (see
+  // reconcileStock, mirroring the bot's product store).
+  stockQuantity: number | null;
   // Public image URL for the GoFood catalog; set via the image upload flow.
   imageUrl: string | null;
+  // Per-variant price delta / stock + selection rules for GoFood. Merged view of
+  // variants_json (names) + variant_pricing_json (dashboard-owned). options is
+  // always one-per-name in `variants`.
+  variantConfig: VariantConfig;
   updatedAt: string;
 }
 
@@ -31,6 +46,7 @@ export interface CreateProductInput {
   variants?: string[] | undefined;
   notes?: string | null | undefined;
   description?: string | null | undefined;
+  stockQuantity?: number | null | undefined;
 }
 
 export interface UpdateProductInput {
@@ -42,6 +58,11 @@ export interface UpdateProductInput {
   variants?: string[] | undefined;
   notes?: string | null | undefined;
   description?: string | null | undefined;
+  stockQuantity?: number | null | undefined;
+  // Full replacement of variants + their pricing/rules (from the menu variant
+  // editor). When present it drives both variants_json and variant_pricing_json;
+  // when absent, both are left unchanged. Takes precedence over `variants`.
+  variantConfig?: VariantConfig | undefined;
 }
 
 export type CreateProductResult =
@@ -63,7 +84,9 @@ interface ProductRow {
   variants_json: string;
   notes: string | null;
   description: string | null;
+  stock_quantity: number | null;
   image_url: string | null;
+  variant_pricing_json: string | null;
   updated_at: string;
 }
 
@@ -78,7 +101,9 @@ const SELECT_COLUMNS = `
   variants_json,
   notes,
   description,
+  stock_quantity,
   image_url,
+  variant_pricing_json,
   updated_at
 `;
 
@@ -94,8 +119,10 @@ const INSERT_SQL = `
     variants_json,
     notes,
     description,
+    stock_quantity,
+    variant_pricing_json,
     updated_at
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 `;
 
 const UPDATE_SQL = `
@@ -109,7 +136,9 @@ const UPDATE_SQL = `
     variants_json = $8,
     notes = $9,
     description = $10,
-    updated_at = $11
+    stock_quantity = $11,
+    variant_pricing_json = $12,
+    updated_at = $13
   WHERE product_id = $1
 `;
 
@@ -228,7 +257,10 @@ async function getProductById(db: Db, productId: string): Promise<ProductRecord 
 }
 
 function normalizeCreateInput(productId: string, input: CreateProductInput): ProductRecord {
-  const stockStatus = input.stockStatus;
+  const stock = reconcileStock(input.stockStatus, input.stockQuantity ?? null);
+  // The add form sets variant names only (no pricing) — variant_pricing_json
+  // stays null; the card's variant editor sets pricing later.
+  const variants = normalizeStringList(input.variants ?? []);
 
   return {
     productId,
@@ -236,18 +268,30 @@ function normalizeCreateInput(productId: string, input: CreateProductInput): Pro
     aliases: normalizeStringList(input.aliases ?? []),
     category: normalizeNullableString(input.category ?? null),
     price: input.price,
-    stockStatus,
-    isAvailable: isAvailableStockStatus(stockStatus),
-    variants: normalizeStringList(input.variants ?? []),
+    stockStatus: stock.stockStatus,
+    isAvailable: stock.isAvailable,
+    variants,
     notes: normalizeNullableString(input.notes ?? null),
     description: normalizeNullableString(input.description ?? null),
+    stockQuantity: stock.stockQuantity,
     imageUrl: null,
+    variantConfig: buildVariantConfig(variants, null),
     updatedAt: isoUtcNow()
   };
 }
 
 function normalizeUpdateInput(current: ProductRecord, input: UpdateProductInput): ProductRecord {
-  const stockStatus = input.stockStatus ?? current.stockStatus;
+  const stock = reconcileStock(
+    input.stockStatus ?? current.stockStatus,
+    input.stockQuantity !== undefined ? input.stockQuantity : current.stockQuantity,
+    // An explicit stockStatus in the same change wins over quantity-derived flips.
+    input.stockStatus !== undefined
+  );
+
+  // variantConfig (full editor payload) wins and rewrites both name list +
+  // pricing; else a names-only `variants` patch keeps existing pricing; else
+  // both are unchanged.
+  const variantState = resolveVariantState(current, input);
 
   return {
     productId: current.productId,
@@ -256,20 +300,79 @@ function normalizeUpdateInput(current: ProductRecord, input: UpdateProductInput)
     category:
       input.category !== undefined ? normalizeNullableString(input.category) : current.category,
     price: input.price ?? current.price,
-    stockStatus,
-    isAvailable: isAvailableStockStatus(stockStatus),
-    variants: input.variants ? normalizeStringList(input.variants) : current.variants,
+    stockStatus: stock.stockStatus,
+    isAvailable: stock.isAvailable,
+    variants: variantState.variants,
     notes: input.notes !== undefined ? normalizeNullableString(input.notes) : current.notes,
     description:
       input.description !== undefined
         ? normalizeNullableString(input.description)
         : current.description,
+    stockQuantity: stock.stockQuantity,
     imageUrl: current.imageUrl,
+    variantConfig: variantState.variantConfig,
     updatedAt: isoUtcNow()
   };
 }
 
+function resolveVariantState(
+  current: ProductRecord,
+  input: UpdateProductInput
+): { variants: string[]; variantConfig: VariantConfig } {
+  if (input.variantConfig !== undefined) {
+    const { names, pricingJson } = serializeVariantConfig(input.variantConfig);
+    return { variants: names, variantConfig: buildVariantConfig(names, pricingJson) };
+  }
+  if (input.variants !== undefined) {
+    // Names-only edit: keep any pricing that still matches a surviving name.
+    const names = normalizeStringList(input.variants);
+    const { pricingJson } = serializeVariantConfig({
+      ...current.variantConfig,
+      options: names.map((name) => {
+        const existing = current.variantConfig.options.find((option) => option.name === name);
+        return existing ?? { name, priceDelta: 0, inStock: true };
+      })
+    });
+    return { variants: names, variantConfig: buildVariantConfig(names, pricingJson) };
+  }
+  return { variants: current.variants, variantConfig: current.variantConfig };
+}
+
+// Keeps quantity and status coherent, mirroring the bot's product store
+// (fasola-order-bot/src/modules/products/product.store.ts reconcileStock):
+// 0 portions means Sold Out (unless Hidden); restocking a Sold Out item makes
+// it Available again unless the caller explicitly set a status in the same
+// change. Untracked (null) quantity is never auto-managed.
+function reconcileStock(
+  stockStatus: StockStatus,
+  stockQuantity: number | null,
+  statusExplicit = true
+): { stockStatus: StockStatus; stockQuantity: number | null; isAvailable: boolean } {
+  let resolvedStatus = stockStatus;
+
+  if (stockQuantity !== null && stockQuantity <= 0 && resolvedStatus !== "Hidden") {
+    resolvedStatus = "Sold Out";
+  } else if (
+    stockQuantity !== null &&
+    stockQuantity > 0 &&
+    resolvedStatus === "Sold Out" &&
+    !statusExplicit
+  ) {
+    resolvedStatus = "Available";
+  }
+
+  return {
+    stockStatus: resolvedStatus,
+    stockQuantity: stockQuantity === null ? null : Math.max(0, stockQuantity),
+    isAvailable:
+      isAvailableStockStatus(resolvedStatus) && (stockQuantity === null || stockQuantity > 0)
+  };
+}
+
 function toProductParams(product: ProductRecord): unknown[] {
+  // Derive the two stored variant columns from variantConfig so names_json and
+  // variant_pricing_json can never drift.
+  const { names, pricingJson } = serializeVariantConfig(product.variantConfig);
   return [
     product.productId,
     product.productName,
@@ -278,14 +381,17 @@ function toProductParams(product: ProductRecord): unknown[] {
     product.price,
     product.stockStatus,
     product.isAvailable ? 1 : 0,
-    JSON.stringify(product.variants),
+    JSON.stringify(names),
     product.notes,
     product.description,
+    product.stockQuantity,
+    pricingJson,
     product.updatedAt
   ];
 }
 
 function mapProductRow(row: ProductRow): ProductRecord {
+  const variants = parseStringList(row.variants_json);
   return {
     productId: row.product_id,
     productName: row.product_name,
@@ -295,10 +401,12 @@ function mapProductRow(row: ProductRow): ProductRecord {
     price: row.price === null ? null : Number(row.price),
     stockStatus: row.stock_status,
     isAvailable: Boolean(row.is_available),
-    variants: parseStringList(row.variants_json),
+    variants,
     notes: row.notes,
     description: row.description,
+    stockQuantity: row.stock_quantity === null ? null : Number(row.stock_quantity),
     imageUrl: row.image_url,
+    variantConfig: buildVariantConfig(variants, row.variant_pricing_json),
     updatedAt: row.updated_at
   };
 }

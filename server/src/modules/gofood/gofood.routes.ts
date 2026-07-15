@@ -150,6 +150,12 @@ export function registerGofoodRoutes(
     return { items: await syncRunStore.listRuns(SYNC_LOG_LIMIT) };
   });
 
+  // Whether the live menu has changed since the last successful GoFood push, so
+  // the Menu page can surface a "needs sync" badge (the push is manual).
+  app.get("/api/gofood/sync-state", async () => {
+    return syncRunStore.getSyncState();
+  });
+
   return Promise.resolve();
 }
 
