@@ -43,6 +43,44 @@ npm run dev                             # Fastify :3100 + Vite :5173 (proxied /a
 Open http://localhost:5173. Optional for bot-ops screens: run GoWA and the
 bot locally (see the bot repo's README).
 
+## Resetting / seeding the dev database
+
+```bash
+npm run db:reset        # drop every table, rebuild the schema (asks first)
+npm run db:seed         # upsert the seed dataset (safe to re-run)
+npm run db:reset:seed   # both, in order
+```
+
+Both commands read `DATABASE_URL` from `.env` and **refuse to run against
+anything but localhost** — they destroy data and must never touch the VM.
+`db:reset` prints what it is about to drop and waits for confirmation; pass
+`--force` (`npm run db:reset -- --force`) to skip the prompt, which is required
+when there is no TTY. Declining exits non-zero so `&&` chains stop.
+
+`db:reset` rebuilds bot-owned tables from `tests/fixtures/bot-schema.sql` (the
+same mirror the tests use, currently bot migrations 001–009) and `fin_*` tables
+from the real migration runner. It is the one place this repo does DDL on bot
+tables — safe only because the target is a throwaway local database.
+
+**The fixture only mirrors the seven bot tables this dashboard reads**
+(`orders`, `products`, `messages`, `ai_logs`, `business_profile`,
+`gofood_settings`, `pending_menu_changes`). A reset therefore drops
+`conversations`, `order_drafts`, `retry_jobs`, `admin_notifications`,
+`gofood_events` and `schema_migrations` without recreating them — the bot
+restores those itself on its next boot, when it re-runs migrations 001–009
+(all `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, so re-running
+against fixture-built tables is a no-op and leaves seeded rows intact). If you
+want the full schema back without starting the bot, run its migration runner
+against `fasola` from the bot repo.
+
+The seed (`scripts/seed-data.ts`) is Dapoer Mami Fasola with the two live
+production items (Mie Ayam, Baslok) plus Bubur Ayam, Soto Ayam and Es Teh Manis
+— the latter three carry placeholder copy and exercise variant pricing and
+`stock_quantity`, which the production rows do not. It also seeds
+`business_profile`, the `gofood_settings` defaults, and ~12 `fin_expenses`
+rows dated relative to today (Asia/Jakarta). It does **not** seed orders, so
+reports and the order list stay empty.
+
 ## Quality commands
 
 ```bash

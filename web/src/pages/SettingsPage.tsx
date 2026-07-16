@@ -24,10 +24,16 @@ import { GofoodSettings } from "./GofoodSettings";
 
 const PROFILE_QUERY_KEY = ["business-profile"] as const;
 
-// Friendly copy for the keys seeded by the bot's migration 004. Keys added
-// later (the bot picks up new rows automatically) still render, with a
-// humanized fallback label.
+// Friendly copy for the keys seeded by the bot's migration 004, plus
+// business_name (added by the seeder — the contract allows new keys and the bot
+// reads every non-empty row). Keys added later still render, with a humanized
+// fallback label.
 const PROFILE_FIELDS: { key: string; label: string; hint: string }[] = [
+  {
+    key: "business_name",
+    label: "Nama Usaha",
+    hint: "Nama yang dipakai bot saat memperkenalkan diri ke pelanggan."
+  },
   {
     key: "opening_hours",
     label: "Jam Buka",
