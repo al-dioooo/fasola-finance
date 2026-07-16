@@ -90,22 +90,108 @@ npm run lint
 npm run build     # dist/web (Vite) + dist/server (tsc)
 ```
 
-## Deployment (VPS, systemd, no Docker)
+## Deployment (Azure VM, systemd, no Docker)
+
+Live at **https://fasola-finance.azuregarden.dedyn.io**, as systemd service
+`fasola-finance` on `127.0.0.1:3100` behind nginx, from
+`/home/aliceevr/projects/fasola/fasola-finance` on the Azure VM (`fasola-vm`,
+malaysiawest). `.env` mirrors `.env.example`; `DATABASE_URL` points at the same
+`fasola` database the bot uses. Health check: `GET /healthz`.
+
+### Deploy an update
+
+Push to `main` first — the VM deploys from GitHub, not from your working tree.
+Then, from your Mac:
 
 ```bash
-# once:
-sudo cp deploy/fasola-finance.service /etc/systemd/system/
-sudo cp deploy/nginx-finance.conf /etc/nginx/sites-available/finance.evergarden.dedyn.io
-sudo ln -s ../sites-available/finance.evergarden.dedyn.io /etc/nginx/sites-enabled/
-sudo certbot --nginx -d finance.evergarden.dedyn.io
-sudo systemctl daemon-reload && sudo systemctl enable --now fasola-finance
-
-# every deploy:
-./deploy/deploy.sh
+ssh -i ~/.ssh/fasola_azure aliceevr@85.211.216.153 \
+  'projects/fasola/fasola-finance/deploy/deploy.sh'
 ```
 
-`.env` on the VPS mirrors `.env.example`; `DATABASE_URL` points at the same
-`fasola` database the bot uses. Health check: `GET /healthz`.
+`deploy/deploy.sh` fetches `origin/main`, dumps the database, rebuilds
+(`dist/web` + `dist/server`), restarts the service, then verifies health and
+migrations — rolling back automatically if either check fails. It prints the
+incoming commits before it changes anything.
+
+Useful flags:
+
+```bash
+deploy/deploy.sh --ref v1.2.0    # deploy a tag/branch/SHA instead of origin/main
+deploy/deploy.sh --ref a1b2c3d   # revert to a known-good commit
+deploy/deploy.sh --force         # discard uncommitted edits made on the VM
+deploy/deploy.sh --skip-backup   # skip the pre-migration dump (no new migrations)
+deploy/deploy.sh --no-rollback   # keep a broken build up so you can debug it live
+```
+
+Your Mac's IP must be in the `fasola-nsg` allow-list for port 22, otherwise the
+SSH connection times out. `~/.ssh/fasola_azure` is the passphraseless deploy key.
+
+### Deploy order (two repos, one database)
+
+**Deploy [fasola-order-bot](../fasola-order-bot) first, then this app**, whenever
+a release touches both. The bot owns the shared bot tables and migrates them;
+this dashboard reads columns those migrations create, so starting it against an
+older bot schema surfaces as 500s on the pages that read them (the menu page and
+the bot's `009_products_variant_pricing` are the live example). This repo owns
+only the `fin_*` tables.
+
+### Database migrations
+
+**Migrations are not a separate step.** `server/src/server.ts` calls
+`runMigrations()` before it listens, so restarting the service applies every
+pending migration in `server/src/db/migrations/index.ts`, recording each in the
+`fin_schema_migrations` table. Deploying code deploys schema.
+
+There are **no down-migrations**. That is why `deploy.sh` dumps the database to
+`~/backups/fasola/` *before* the restart (keeping the last 10), and re-checks
+`fin_schema_migrations` against the IDs the new code declares *after* it. A
+failed migration means the service fails to boot, which the health check catches.
+
+Rollback restores **code, not schema**. Migrations are additive, so the older
+build runs fine against the newer schema. To undo a schema change, restore the
+dump: `gunzip -c ~/backups/fasola/fasola-<stamp>-pre-<sha>.sql.gz | psql "$DATABASE_URL"`.
+
+Inspect what is applied at any time:
+
+```bash
+psql -U postgres -h 127.0.0.1 -d fasola -c 'SELECT id, applied_at FROM fin_schema_migrations ORDER BY id'
+```
+
+> `npm run db:reset` / `db:seed` are **local-only** and refuse to run against
+> anything but localhost. They are never part of a deploy.
+
+### First-time setup on a new machine
+
+`deploy.sh` needs the directory to be a git clone. On a fresh VM:
+
+```bash
+mkdir -p ~/projects/fasola && cd ~/projects/fasola
+git clone https://github.com/al-dioooo/fasola-finance.git
+cd fasola-finance
+cp .env.example .env    # set ADMIN_PASSWORD + SESSION_SECRET + DATABASE_URL
+npm ci && npm run build
+
+sudo cp deploy/fasola-finance.service /etc/systemd/system/
+sudo cp deploy/nginx-finance.conf /etc/nginx/sites-available/fasola-finance
+sudo ln -s ../sites-available/fasola-finance /etc/nginx/sites-enabled/
+sudo certbot --nginx -d fasola-finance.azuregarden.dedyn.io
+sudo systemctl daemon-reload && sudo systemctl enable --now fasola-finance
+```
+
+To convert an existing rsynced directory into a clone in place (`.env`,
+`node_modules` and other untracked files survive):
+
+```bash
+cd ~/projects/fasola/fasola-finance
+git init && git symbolic-ref HEAD refs/heads/main
+git remote add origin https://github.com/al-dioooo/fasola-finance.git
+git fetch origin main
+git reset --mixed origin/main   # inspect `git status` before resetting --hard
+```
+
+The unit template ships `User=fasola`; the Azure VM runs the services as
+`aliceevr`, so adjust `User=`/`Group=` to match the account that owns
+`~/projects/fasola` and `.env`.
 
 ## Panduan singkat untuk pemilik (ops runbook)
 
